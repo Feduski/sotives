@@ -56,17 +56,40 @@ async def get_user_commitments(
     address: str,
     client: MonadClient = Depends(get_monad_client),
 ):
-    """Retorna los IDs de compromisos de un usuario."""
+    """Retorna los compromisos de un usuario con todos sus datos."""
     try:
-        ids = await client.get_user_commitments(address)
-        commitments = []
-        for cid in ids:
-            c = await client.get_commitment(cid)
-            c["id"] = cid
-            commitments.append(c)
+        commitments = await client.get_user_commitments(address)
         return {"address": address, "commitments": commitments}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/next-id")
+async def get_next_commitment_id(
+    client: MonadClient = Depends(get_monad_client),
+):
+    """Retorna el próximo ID de compromiso. Útil para el frontend antes de enviar la tx."""
+    try:
+        next_id = await client.get_next_commitment_id()
+        return {"next_commitment_id": next_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/stats")
+async def get_stats(
+    client: MonadClient = Depends(get_monad_client),
+):
+    """Retorna estadísticas globales: total en pool y próximo ID (= cantidad de compromisos creados)."""
+    try:
+        pool_total = await client.get_pool_total()
+        next_id = await client.get_next_commitment_id()
+        return {
+            "total_commitments": next_id,
+            "pool_total_mon": pool_total,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/validate", response_model=ValidationResponse)
