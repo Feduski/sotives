@@ -26,6 +26,8 @@ class MonadClient:
             address=self.w3.to_checksum_address(settings.MULTISIG_FACTORY_ADDRESS),
             abi=GROUP_MULTISIG_ABI,
         )
+        # Pool que recibe los fondos de compromisos fallidos
+        self.pool_address = self.w3.to_checksum_address(settings.COMMITMENT_POOL_ADDRESS)
 
     async def resolve_commitment(self, commitment_id: int, fulfilled: bool) -> str:
         """Llama resolveCommitment en el contrato. Retorna el tx hash."""

@@ -11,8 +11,9 @@ class Settings(BaseSettings):
     # Los usuarios depositan desde sus propias wallets vía el frontend.
     VALIDATOR_PRIVATE_KEY: str = ""
 
-    # Contracts (se llenan después del deploy)
+    # Contracts
     COMMITMENT_MANAGER_ADDRESS: str = "0x0000000000000000000000000000000000000000"
+    COMMITMENT_POOL_ADDRESS: str = "0x0000000000000000000000000000000000000000"
     MULTISIG_FACTORY_ADDRESS: str = "0x0000000000000000000000000000000000000000"
 
     # AI
@@ -20,9 +21,6 @@ class Settings(BaseSettings):
 
     # GitHub: opcional para repos públicos (sin token = 60 req/h, con token = 5000 req/h)
     GITHUB_TOKEN: str = ""
-
-    # Twitter/X: obligatorio para leer tweets via API v2
-    TWITTER_BEARER_TOKEN: str = ""
 
     class Config:
         env_file = ".env"
