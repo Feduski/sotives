@@ -1,6 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { useAccount, useBalance } from "wagmi";
+import { formatUnits } from "viem";
+import { monadTestnet } from "@/lib/wagmi";
+import { useMockTransaction } from "@/hooks/use-mock-transaction";
 
 type Group = {
   id: string;
@@ -63,12 +67,34 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
   const [newCommitment, setNewCommitment] = useState({ goal: "", stake: "", deadline: "" });
   const [groups, setGroups] = useState<Group[]>(MOCK_GROUPS);
   const [commitments, setCommitments] = useState<Commitment[]>(MOCK_COMMITMENTS);
+  const [fundTarget, setFundTarget] = useState<Commitment | null>(null);
+  const [fundAmount, setFundAmount] = useState("");
+
+  const { address, isConnected } = useAccount();
+  const { data: balance } = useBalance({
+    address,
+    chainId: monadTestnet.id,
+    query: { enabled: isConnected },
+  });
+  const stakeTx = useMockTransaction();
+  const fundTx = useMockTransaction();
+
+  const formattedBalance = balance
+    ? `${Number(formatUnits(balance.value, balance.decimals)).toFixed(2)} MON`
+    : null;
 
   function closeModal() {
     setModal(null);
     setJoinCode("");
     setNewGroupName("");
     setNewCommitment({ goal: "", stake: "", deadline: "" });
+    stakeTx.reset();
+  }
+
+  function closeFundModal() {
+    setFundTarget(null);
+    setFundAmount("");
+    fundTx.reset();
   }
 
   function handleCreateGroup(e: React.FormEvent) {
@@ -93,21 +119,32 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
     closeModal();
   }
 
-  function handleAddCommitment(e: React.FormEvent) {
+  async function handleAddCommitment(e: React.FormEvent) {
     e.preventDefault();
     if (!newCommitment.goal.trim() || !selectedGroup) return;
+    const stakeAmount = Number(newCommitment.stake) || 0;
+    if (isConnected && stakeAmount > 0) {
+      await stakeTx.execute();
+    }
     const c: Commitment = {
       id: `c${commitments.length + 1}`,
       groupId: selectedGroup.id,
       user: username,
       goal: newCommitment.goal.trim(),
-      stake: Number(newCommitment.stake) || 0,
+      stake: stakeAmount,
       deadline: newCommitment.deadline || "—",
       status: "en curso",
       daysLeft: 30,
     };
     setCommitments([...commitments, c]);
     closeModal();
+  }
+
+  async function handleFund(e: React.FormEvent) {
+    e.preventDefault();
+    if (!fundTarget || !fundAmount) return;
+    await fundTx.execute();
+    closeFundModal();
   }
 
   const groupCommitments = selectedGroup
@@ -365,6 +402,19 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
                     </span>
                   </div>
                 )}
+
+                {c.status !== "cumplido" && c.user !== username && (
+                  <button
+                    onClick={() => setFundTarget(c)}
+                    className="mt-3 flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+                    style={{ backgroundColor: "rgba(116,68,166,0.15)", color: "#c084fc", border: "1px solid rgba(116,68,166,0.3)" }}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Fondear con MON
+                  </button>
+                )}
               </div>
             ))}
 
@@ -471,9 +521,33 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
             {modal === "commitment" && (
               <>
                 <h2 className="font-black text-xl text-white mb-1">Nuevo compromiso</h2>
-                <p className="text-sm mb-5" style={{ color: "rgba(255,255,255,0.4)" }}>
+                <p className="text-sm mb-4" style={{ color: "rgba(255,255,255,0.4)" }}>
                   El grupo verá tu compromiso y la IA validará la evidencia.
                 </p>
+
+                {/* Wallet status */}
+                {isConnected ? (
+                  <div
+                    className="flex items-center gap-2 rounded-xl px-3 py-2 mb-4 text-xs"
+                    style={{ backgroundColor: "rgba(116,68,166,0.12)", border: "1px solid rgba(116,68,166,0.3)" }}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
+                    <span className="font-mono text-white">{address?.slice(0,6)}…{address?.slice(-4)}</span>
+                    <span style={{ color: "rgba(255,255,255,0.4)" }}>·</span>
+                    <span className="font-bold" style={{ color: "#F28B0C" }}>{formattedBalance}</span>
+                  </div>
+                ) : (
+                  <div
+                    className="flex items-center gap-2 rounded-xl px-3 py-2 mb-4 text-xs"
+                    style={{ backgroundColor: "rgba(242,139,12,0.08)", border: "1px solid rgba(242,139,12,0.2)", color: "rgba(255,255,255,0.5)" }}
+                  >
+                    <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="#F28B0C" strokeWidth={2.5} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                    </svg>
+                    Conectá tu wallet para fondear el stake en MON.
+                  </div>
+                )}
+
                 <form onSubmit={handleAddCommitment} className="space-y-3">
                   <textarea
                     placeholder="Describí tu objetivo con claridad (qué, cuánto, cuándo)"
@@ -486,7 +560,7 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>
-                        Stake (USD)
+                        Stake (MON)
                       </label>
                       <input
                         type="number"
@@ -494,7 +568,8 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
                         min={1}
                         value={newCommitment.stake}
                         onChange={(e) => setNewCommitment({ ...newCommitment, stake: e.target.value })}
-                        className="w-full px-4 py-2.5 rounded-xl text-white text-sm outline-none"
+                        disabled={!isConnected}
+                        className="w-full px-4 py-2.5 rounded-xl text-white text-sm outline-none disabled:opacity-40"
                         style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }}
                       />
                     </div>
@@ -511,27 +586,135 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
                       />
                     </div>
                   </div>
+
+                  {/* Tx status */}
+                  {stakeTx.status === "success" && stakeTx.txHash && (
+                    <div
+                      className="rounded-xl px-3 py-2 text-xs font-mono"
+                      style={{ backgroundColor: "rgba(242,139,12,0.1)", border: "1px solid rgba(242,139,12,0.3)", color: "#F28B0C" }}
+                    >
+                      ✓ Stake enviado · {stakeTx.txHash.slice(0,14)}…
+                    </div>
+                  )}
+
                   <div className="flex gap-3 pt-1">
                     <button
                       type="button"
                       onClick={closeModal}
-                      className="flex-1 py-3 rounded-xl text-sm font-semibold"
+                      disabled={stakeTx.status === "pending"}
+                      className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
                       style={{ backgroundColor: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.6)" }}
                     >
                       Cancelar
                     </button>
                     <button
                       type="submit"
-                      className="flex-1 py-3 rounded-xl text-sm font-black disabled:opacity-40"
+                      disabled={!newCommitment.goal.trim() || stakeTx.status === "pending"}
+                      className="flex-1 py-3 rounded-xl text-sm font-black disabled:opacity-40 flex items-center justify-center gap-2"
                       style={{ backgroundColor: "#F28B0C", color: "#40011E" }}
-                      disabled={!newCommitment.goal.trim()}
                     >
-                      Crear compromiso →
+                      {stakeTx.status === "pending" ? (
+                        <>
+                          <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                          </svg>
+                          Enviando…
+                        </>
+                      ) : isConnected && newCommitment.stake ? (
+                        `Crear + Stake ${newCommitment.stake} MON →`
+                      ) : (
+                        "Crear compromiso →"
+                      )}
                     </button>
                   </div>
                 </form>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Fund modal */}
+      {fundTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}
+          onClick={(e) => e.target === e.currentTarget && closeFundModal()}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl p-6"
+            style={{ backgroundColor: "#1a0020", border: "1px solid rgba(116,68,166,0.5)" }}
+          >
+            <h2 className="font-black text-xl text-white mb-1">Fondear compromiso</h2>
+            <p className="text-sm mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>
+              {fundTarget.user} · {fundTarget.goal.slice(0, 55)}…
+            </p>
+            <p className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.3)" }}>
+              Agregás MON al escrow del compromiso. Si cumple, recupera todo. Si falla, va al fondo del grupo.
+            </p>
+
+            {isConnected ? (
+              <div
+                className="flex items-center gap-2 rounded-xl px-3 py-2 mb-4 text-xs"
+                style={{ backgroundColor: "rgba(116,68,166,0.12)", border: "1px solid rgba(116,68,166,0.3)" }}
+              >
+                <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
+                <span className="font-mono text-white">{address?.slice(0,6)}…{address?.slice(-4)}</span>
+                <span className="font-bold ml-auto" style={{ color: "#F28B0C" }}>{formattedBalance}</span>
+              </div>
+            ) : (
+              <div className="rounded-xl px-3 py-2 mb-4 text-xs" style={{ backgroundColor: "rgba(242,139,12,0.08)", border: "1px solid rgba(242,139,12,0.2)", color: "rgba(255,255,255,0.5)" }}>
+                Conectá tu wallet para fondear.
+              </div>
+            )}
+
+            <form onSubmit={handleFund} className="space-y-4">
+              <div>
+                <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>
+                  Monto (MON)
+                </label>
+                <input
+                  type="number"
+                  placeholder="10"
+                  min={1}
+                  value={fundAmount}
+                  onChange={(e) => setFundAmount(e.target.value)}
+                  disabled={!isConnected}
+                  className="w-full px-4 py-2.5 rounded-xl text-white text-sm outline-none disabled:opacity-40"
+                  style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }}
+                  autoFocus
+                />
+              </div>
+
+              {fundTx.status === "success" && (
+                <div className="rounded-xl px-3 py-2 text-xs font-mono" style={{ backgroundColor: "rgba(242,139,12,0.1)", border: "1px solid rgba(242,139,12,0.3)", color: "#F28B0C" }}>
+                  ✓ Fondeo confirmado · {fundTx.txHash?.slice(0,14)}…
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button type="button" onClick={closeFundModal} className="flex-1 py-3 rounded-xl text-sm font-semibold" style={{ backgroundColor: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.6)" }}>
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={!isConnected || !fundAmount || fundTx.status === "pending"}
+                  className="flex-1 py-3 rounded-xl text-sm font-black disabled:opacity-40 flex items-center justify-center gap-2"
+                  style={{ backgroundColor: "#7544A6", color: "white" }}
+                >
+                  {fundTx.status === "pending" ? (
+                    <>
+                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                      </svg>
+                      Enviando…
+                    </>
+                  ) : `Fondear ${fundAmount || "0"} MON →`}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

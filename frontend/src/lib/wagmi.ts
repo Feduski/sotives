@@ -1,14 +1,21 @@
 import { createConfig, http } from "wagmi";
+import { injected, metaMask } from "wagmi/connectors";
 import { monadTestnet } from "viem/chains";
+
+export { monadTestnet };
 
 export const wagmiConfig = createConfig({
   chains: [monadTestnet],
+  connectors: [
+    injected({ shimDisconnect: true }),
+    metaMask(),
+  ],
   transports: {
     [monadTestnet.id]: http("https://testnet-rpc.monad.xyz"),
   },
+  ssr: true,
 });
 
-// Addresses de los contratos deployados en Monad Testnet
 export const CONTRACTS = {
   commitmentManager: process.env.NEXT_PUBLIC_COMMITMENT_MANAGER_ADDRESS as `0x${string}`,
   commitmentPool: process.env.NEXT_PUBLIC_COMMITMENT_POOL_ADDRESS as `0x${string}`,
