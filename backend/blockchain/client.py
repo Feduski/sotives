@@ -8,6 +8,7 @@ from eth_account import Account
 
 from config import settings
 from .abis import COMMITMENT_MANAGER_ABI, COMMITMENT_POOL_ABI, GROUP_MULTISIG_ABI
+from .erc8004 import ERC8004Client
 
 STATUS_MAP = {0: "Active", 1: "EvidenceSubmitted", 2: "Fulfilled", 3: "Failed"}
 
@@ -33,6 +34,9 @@ class MonadClient:
             address=self.w3.to_checksum_address(settings.MULTISIG_FACTORY_ADDRESS),
             abi=GROUP_MULTISIG_ABI,
         )
+
+        # ERC-8004: identidad y reputación del agente on-chain (best-effort)
+        self.erc8004 = ERC8004Client(self.w3, self.account, settings.CHAIN_ID)
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -95,10 +99,15 @@ class MonadClient:
     async def get_ai_agent(self) -> str:
         return await self.commitment_manager.functions.aiAgent().call()
 
-    async def resolve_commitment(self, commitment_id: int, fulfilled: bool) -> str:
+    async def resolve_commitment(self, commitment_id: int, fulfilled: bool, reasoning: str = "") -> str:
         """Llamado por el backend como árbitro IA tras validar evidencia."""
         fn = self.commitment_manager.functions.resolveCommitment(commitment_id, fulfilled)
-        return await self._send_tx(fn)
+        tx_hash = await self._send_tx(fn)
+
+        # ERC-8004: submitir reputación después de resolver (best-effort, no bloquea)
+        await self.erc8004.submit_reputation(commitment_id, fulfilled, reasoning)
+
+        return tx_hash
 
     async def mark_expired(self, commitment_id: int) -> str:
         """Marca como fallido un compromiso vencido sin evidencia."""

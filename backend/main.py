@@ -1,9 +1,15 @@
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from web3 import AsyncWeb3
 
 from routers import commitments_router, groups_router, wallet_router
 from config import settings
+from dependencies import get_monad_client
+
+logger = logging.getLogger(__name__)
 
 # Orígenes permitidos — el frontend en desarrollo y producción
 ALLOWED_ORIGINS = [
@@ -12,10 +18,26 @@ ALLOWED_ORIGINS = [
     "https://sotives.vercel.app",  # producción (cambiar si cambia el dominio)
 ]
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup: registrar el agente en ERC-8004 si no está registrado."""
+    try:
+        client = get_monad_client()
+        tx_hash = await client.erc8004.register_agent()
+        if tx_hash:
+            logger.info(f"ERC-8004: agente registrado en startup — tx: {tx_hash}")
+        else:
+            logger.info("ERC-8004: agente ya registrado, omitiendo registro")
+    except Exception as e:
+        logger.warning(f"ERC-8004: no se pudo registrar en startup (non-fatal): {e}")
+    yield
+
+
 app = FastAPI(
     title="soTives API",
     description="Backend para la plataforma de compromisos verificables on Monad",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
