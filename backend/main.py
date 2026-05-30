@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from web3 import AsyncWeb3
 
-from routers import commitments_router, groups_router
+from routers import commitments_router, groups_router, wallet_router
 from config import settings
 
 # Orígenes permitidos — el frontend en desarrollo y producción
@@ -28,6 +28,7 @@ app.add_middleware(
 
 app.include_router(commitments_router)
 app.include_router(groups_router)
+app.include_router(wallet_router)
 
 
 @app.get("/health")
