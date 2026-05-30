@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import PrivateGroupsTab from "./private-groups-tab";
 import PublicTab from "./public-tab";
@@ -47,12 +48,7 @@ export default function AppPage() {
       >
         <div className="w-full max-w-sm">
           <Link href="/" className="flex items-center gap-2 mb-12 justify-center">
-            <svg width="32" height="32" viewBox="0 0 28 28" fill="none">
-              <circle cx="14" cy="14" r="13" fill="#F28B0C" />
-              <path d="M14 6 L18 12 L14 10 L10 12 Z" fill="#40011E" />
-              <circle cx="14" cy="16" r="5" fill="#40011E" />
-              <path d="M10 19 L14 22 L18 19" fill="#40011E" />
-            </svg>
+            <Image src="/logo.png" alt="SoTives logo" width={32} height={32} />
             <span className="font-black text-2xl text-white tracking-tight">SoTives</span>
           </Link>
 
@@ -109,12 +105,7 @@ export default function AppPage() {
         }}
       >
         <Link href="/" className="flex items-center gap-2">
-          <svg width="24" height="24" viewBox="0 0 28 28" fill="none">
-            <circle cx="14" cy="14" r="13" fill="#F28B0C" />
-            <path d="M14 6 L18 12 L14 10 L10 12 Z" fill="#40011E" />
-            <circle cx="14" cy="16" r="5" fill="#40011E" />
-            <path d="M10 19 L14 22 L18 19" fill="#40011E" />
-          </svg>
+          <Image src="/logo.png" alt="SoTives logo" width={24} height={24} />
           <span className="font-black text-lg text-white tracking-tight">SoTives</span>
         </Link>
 

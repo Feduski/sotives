@@ -17,6 +17,10 @@ export const metadata: Metadata = {
   title: "SoTives — Compromisos Verificables",
   description:
     "Convierte tus promesas en compromisos reales. Incentivos económicos, accountability social y validación por IA.",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({

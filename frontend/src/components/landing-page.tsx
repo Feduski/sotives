@@ -102,12 +102,7 @@ export default function LandingPage() {
         }}
       >
         <a href="#" className="flex items-center gap-2">
-          <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-            <circle cx="14" cy="14" r="13" fill="#F28B0C" />
-            <path d="M14 6 L18 12 L14 10 L10 12 Z" fill="#40011E" />
-            <circle cx="14" cy="16" r="5" fill="#40011E" />
-            <path d="M10 19 L14 22 L18 19" fill="#40011E" />
-          </svg>
+          <Image src="/logo.png" alt="SoTives logo" width={28} height={28} />
           <span className="font-black text-xl tracking-tight text-white">SoTives</span>
         </a>
 
@@ -539,12 +534,13 @@ export default function LandingPage() {
           style={{ color: "rgba(255,255,255,0.35)" }}
         >
           <div className="flex items-center gap-2">
-            <svg width="22" height="22" viewBox="0 0 28 28" fill="none">
-              <circle cx="14" cy="14" r="13" fill="#F28B0C" opacity="0.8" />
-              <path d="M14 6 L18 12 L14 10 L10 12 Z" fill="#40011E" />
-              <circle cx="14" cy="16" r="5" fill="#40011E" />
-              <path d="M10 19 L14 22 L18 19" fill="#40011E" />
-            </svg>
+            <Image
+              src="/logo.png"
+              alt="SoTives logo"
+              width={22}
+              height={22}
+              className="opacity-80"
+            />
             <span className="font-bold" style={{ color: "rgba(255,255,255,0.5)" }}>SoTives</span>
           </div>
           <div className="flex gap-6">
