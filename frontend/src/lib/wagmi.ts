@@ -1,19 +1,8 @@
 import { createConfig, http } from "wagmi";
 import { injected, metaMask } from "wagmi/connectors";
-import { defineChain } from "viem";
+import { monadTestnet } from "viem/chains";
 
-export const monadTestnet = defineChain({
-  id: 10143,
-  name: "Monad Testnet",
-  nativeCurrency: { name: "MON", symbol: "MON", decimals: 18 },
-  rpcUrls: {
-    default: { http: ["https://testnet-rpc.monad.xyz"] },
-  },
-  blockExplorers: {
-    default: { name: "Monad Explorer", url: "https://explorer.testnet.monad.xyz" },
-  },
-  testnet: true,
-});
+export { monadTestnet };
 
 export const wagmiConfig = createConfig({
   chains: [monadTestnet],
@@ -22,7 +11,15 @@ export const wagmiConfig = createConfig({
     metaMask(),
   ],
   transports: {
-    [monadTestnet.id]: http(),
+    [monadTestnet.id]: http("https://testnet-rpc.monad.xyz"),
   },
   ssr: true,
 });
+
+export const CONTRACTS = {
+  commitmentManager: process.env.NEXT_PUBLIC_COMMITMENT_MANAGER_ADDRESS as `0x${string}`,
+  commitmentPool: process.env.NEXT_PUBLIC_COMMITMENT_POOL_ADDRESS as `0x${string}`,
+  groupMultisig: process.env.NEXT_PUBLIC_MULTISIG_ADDRESS as `0x${string}`,
+};
+
+export const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";

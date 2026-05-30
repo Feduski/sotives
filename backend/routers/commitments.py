@@ -18,7 +18,7 @@ router = APIRouter(prefix="/commitments", tags=["commitments"])
 class SubmitEvidenceRequest(BaseModel):
     commitment_id: int
     evidence_type: EvidenceType
-    evidence_value: str  # URL, texto, base64 del archivo, tweet URL
+    evidence_value: str  # URL, texto, base64 del archivo
 
 
 class ValidateRequest(BaseModel):

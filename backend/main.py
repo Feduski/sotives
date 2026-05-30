@@ -70,6 +70,10 @@ async def health():
         "ok": settings.COMMITMENT_MANAGER_ADDRESS != zero,
         "address": settings.COMMITMENT_MANAGER_ADDRESS,
     }
+    checks["commitment_pool"] = {
+        "ok": settings.COMMITMENT_POOL_ADDRESS != zero,
+        "address": settings.COMMITMENT_POOL_ADDRESS,
+    }
     checks["multisig_factory"] = {
         "ok": settings.MULTISIG_FACTORY_ADDRESS != zero,
         "address": settings.MULTISIG_FACTORY_ADDRESS,
@@ -82,12 +86,6 @@ async def health():
     checks["github_token"] = {
         "ok": True,
         "note": "configurado" if settings.GITHUB_TOKEN else "no configurado (solo repos públicos, 60 req/h)",
-    }
-
-    # Twitter/X
-    checks["twitter"] = {
-        "ok": bool(settings.TWITTER_BEARER_TOKEN),
-        "note": "configurado" if settings.TWITTER_BEARER_TOKEN else "no configurado — validación de tweets deshabilitada",
     }
 
     all_critical_ok = all([
