@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import ShipIllustration from "@/components/ship-illustration";
+import Image from "next/image";
 
 const steps = [
   {
@@ -123,7 +123,7 @@ export default function LandingPage() {
           className="hidden md:inline-flex items-center gap-2 font-bold text-sm px-5 py-2.5 rounded-full transition-colors"
           style={{ backgroundColor: "#F28B0C", color: "#40011E" }}
         >
-          Crear compromiso
+          Comprometerse
         </a>
 
         <button
@@ -158,7 +158,7 @@ export default function LandingPage() {
             style={{ backgroundColor: "#F28B0C", color: "#40011E" }}
             onClick={() => setMenuOpen(false)}
           >
-            Crear compromiso
+            Comprometerse
           </a>
         </div>
       )}
@@ -177,26 +177,35 @@ export default function LandingPage() {
           {/* Text */}
           <div className="pb-16">
             <h1
-              className="font-black leading-none tracking-tight mb-5"
-              style={{ fontSize: "clamp(4.5rem, 11vw, 9rem)" }}
+              className="font-black leading-none tracking-tight mb-4"
+              style={{ fontSize: "clamp(2.8rem, 5.5vw, 4.5rem)", color: "#F28B0C" }}
             >
               SoTives
             </h1>
 
-            <div className="mb-8 space-y-2">
-              <p className="font-light tracking-widest text-sm uppercase" style={{ color: "#F28B0C" }}>
-                Verificable, Incentivado.
-              </p>
-              <p className="font-light text-sm" style={{ color: "#7544A6" }}>
-                Aumenta tu ejecución.
-              </p>
-              <p className="font-thin text-xs italic" style={{ color: "rgba(255,255,255,0.3)" }}>
-                Push yourself.
-              </p>
-              <p className="font-light text-xs pt-1" style={{ color: "rgba(255,255,255,0.45)" }}>
-                El precio real de abandonar. Convierte promesas en compromisos reales.
-              </p>
-            </div>
+            <p
+              className="font-medium leading-tight mb-6"
+              style={{ fontSize: "clamp(1.2rem, 2.4vw, 1.9rem)", color: "#7544A6" }}
+            >
+              El precio real<br />de abandonar.
+            </p>
+
+            <ul className="space-y-2 mb-8">
+              {[
+                { text: "Aumenta tu ejecución.", color: "#F28B0C" },
+                { text: "Verificable, Incentivado.", color: "#c084fc" },
+                { text: "Sin intermediarios.", color: "rgba(255,255,255,0.3)" },
+              ].map((item) => (
+                <li
+                  key={item.text}
+                  className="flex items-start gap-2 font-light"
+                  style={{ fontSize: "clamp(0.8rem, 1.4vw, 0.95rem)", color: item.color }}
+                >
+                  <span className="mt-0.5 select-none">—</span>
+                  <span>{item.text}</span>
+                </li>
+              ))}
+            </ul>
 
             <div className="flex flex-wrap gap-3">
               <a
@@ -204,7 +213,7 @@ export default function LandingPage() {
                 className="font-black text-base px-7 py-3.5 rounded-full transition-colors"
                 style={{ backgroundColor: "#F28B0C", color: "#40011E" }}
               >
-                Crear compromiso →
+                Comprometerse →
               </a>
               <a
                 href="#como-funciona"
@@ -216,12 +225,15 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* Illustration */}
-          <div
-            className="flex items-end justify-center md:justify-end"
-            style={{ maxHeight: "580px" }}
-          >
-            <ShipIllustration />
+          {/* Hero image */}
+          <div className="relative min-h-[320px] md:min-h-[480px]">
+            <Image
+              src="/hero2.png"
+              alt="SoTives — El precio real de abandonar"
+              fill
+              className="object-contain object-bottom md:object-right-bottom"
+              priority
+            />
           </div>
         </div>
       </section>

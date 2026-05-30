@@ -1,6 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { useAccount, useBalance } from "wagmi";
+import { formatUnits } from "viem";
+import { monadTestnet } from "@/lib/wagmi";
+import { useMockTransaction } from "@/hooks/use-mock-transaction";
 
 type PublicCommitment = {
   id: string;
@@ -114,23 +118,39 @@ export default function PublicTab({ username }: { username: string }) {
   const [supported, setSupported] = useState<Set<string>>(new Set());
   const [form, setForm] = useState({ goal: "", stake: "", deadline: "", category: "Proyectos", description: "" });
 
+  const { address, isConnected } = useAccount();
+  const { data: balance } = useBalance({
+    address,
+    chainId: monadTestnet.id,
+    query: { enabled: isConnected },
+  });
+  const supportTx = useMockTransaction();
+  const publishTx = useMockTransaction();
+
+  const formattedBalance = balance
+    ? `${Number(formatUnits(balance.value, balance.decimals)).toFixed(2)} MON`
+    : null;
+
   const filtered = selectedCategory === "Todos"
     ? MOCK_PUBLIC
     : MOCK_PUBLIC.filter((p) => p.category === selectedCategory);
 
-  function handleSupport(e: React.FormEvent) {
+  async function handleSupport(e: React.FormEvent) {
     e.preventDefault();
-    if (supportTarget) {
-      setSupported((prev) => new Set([...prev, supportTarget.id]));
-    }
+    if (!supportTarget || !isConnected) return;
+    await supportTx.execute();
+    setSupported((prev) => new Set([...prev, supportTarget.id]));
     setSupportTarget(null);
     setSupportAmount("");
+    supportTx.reset();
   }
 
-  function handlePublish(e: React.FormEvent) {
+  async function handlePublish(e: React.FormEvent) {
     e.preventDefault();
+    if (isConnected) await publishTx.execute();
     setShowNewCommitment(false);
     setForm({ goal: "", stake: "", deadline: "", category: "Proyectos", description: "" });
+    publishTx.reset();
   }
 
   return (
@@ -314,15 +334,28 @@ export default function PublicTab({ username }: { username: string }) {
           >
             <h2 className="font-black text-xl text-white mb-1">Apoyar compromiso</h2>
             <p className="text-sm mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>
-              {supportTarget.user} · {supportTarget.goal.slice(0, 60)}…
+              {supportTarget.user} · {supportTarget.goal.slice(0, 55)}…
             </p>
-            <p className="text-xs mb-5" style={{ color: "rgba(255,255,255,0.3)" }}>
-              Si cumple, recuperás tu aporte más un bonus de reputación. Si no cumple, va al fondo comunitario.
+            <p className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.3)" }}>
+              Si cumple, recuperás tu aporte. Si no cumple, va al fondo comunitario.
             </p>
+
+            {isConnected ? (
+              <div className="flex items-center gap-2 rounded-xl px-3 py-2 mb-4 text-xs" style={{ backgroundColor: "rgba(116,68,166,0.12)", border: "1px solid rgba(116,68,166,0.3)" }}>
+                <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
+                <span className="font-mono text-white">{address?.slice(0,6)}…{address?.slice(-4)}</span>
+                {formattedBalance && <span className="font-bold ml-auto" style={{ color: "#F28B0C" }}>{formattedBalance}</span>}
+              </div>
+            ) : (
+              <div className="rounded-xl px-3 py-2 mb-4 text-xs" style={{ backgroundColor: "rgba(242,139,12,0.08)", border: "1px solid rgba(242,139,12,0.2)", color: "rgba(255,255,255,0.5)" }}>
+                Conectá tu wallet para apoyar con MON.
+              </div>
+            )}
+
             <form onSubmit={handleSupport} className="space-y-4">
               <div>
                 <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>
-                  Monto a aportar (USD)
+                  Monto a aportar (MON)
                 </label>
                 <input
                   type="number"
@@ -330,33 +363,44 @@ export default function PublicTab({ username }: { username: string }) {
                   min={1}
                   value={supportAmount}
                   onChange={(e) => setSupportAmount(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl text-white text-sm outline-none"
+                  disabled={!isConnected}
+                  className="w-full px-4 py-3 rounded-xl text-white text-sm outline-none disabled:opacity-40"
                   style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }}
                   autoFocus
                 />
               </div>
-              <div
-                className="rounded-xl p-3 text-xs"
-                style={{ backgroundColor: "rgba(242,139,12,0.08)", border: "1px solid rgba(242,139,12,0.2)", color: "rgba(255,255,255,0.5)" }}
-              >
-                Tu aporte queda en escrow hasta que la IA verifica el resultado.
-              </div>
+
+              {supportTx.status === "success" && (
+                <div className="rounded-xl px-3 py-2 text-xs font-mono" style={{ backgroundColor: "rgba(242,139,12,0.1)", border: "1px solid rgba(242,139,12,0.3)", color: "#F28B0C" }}>
+                  ✓ Aporte enviado · {supportTx.txHash?.slice(0,14)}…
+                </div>
+              )}
+
               <div className="flex gap-3">
                 <button
                   type="button"
-                  onClick={() => setSupportTarget(null)}
-                  className="flex-1 py-3 rounded-xl text-sm font-semibold"
+                  onClick={() => { setSupportTarget(null); supportTx.reset(); }}
+                  disabled={supportTx.status === "pending"}
+                  className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
                   style={{ backgroundColor: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.6)" }}
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-3 rounded-xl text-sm font-black disabled:opacity-40"
+                  disabled={!isConnected || !supportAmount || Number(supportAmount) < 1 || supportTx.status === "pending"}
+                  className="flex-1 py-3 rounded-xl text-sm font-black disabled:opacity-40 flex items-center justify-center gap-2"
                   style={{ backgroundColor: "#F28B0C", color: "#40011E" }}
-                  disabled={!supportAmount || Number(supportAmount) < 1}
                 >
-                  Confirmar →
+                  {supportTx.status === "pending" ? (
+                    <>
+                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                      </svg>
+                      Enviando…
+                    </>
+                  ) : `Apoyar ${supportAmount || ""} MON →`}
                 </button>
               </div>
             </form>

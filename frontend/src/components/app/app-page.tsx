@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import PrivateGroupsTab from "./private-groups-tab";
 import PublicTab from "./public-tab";
+import ConnectButton from "@/components/wallet/connect-button";
 
 type Tab = "privado" | "publico";
 
@@ -117,17 +118,21 @@ export default function AppPage() {
           <span className="font-black text-lg text-white tracking-tight">SoTives</span>
         </Link>
 
-        <div
-          className="flex items-center gap-2 px-3 py-1.5 rounded-full text-sm"
-          style={{ backgroundColor: "rgba(116,68,166,0.2)", color: "#c084fc" }}
-        >
-          <div
-            className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black text-white"
-            style={{ background: "linear-gradient(135deg,#580259,#7544A6)" }}
+        <div className="flex items-center gap-2">
+          <ConnectButton />
+          <Link
+            href="/perfil"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors hover:bg-white/10"
+            style={{ backgroundColor: "rgba(116,68,166,0.2)", color: "#c084fc" }}
           >
-            {username[0].toUpperCase()}
-          </div>
-          <span className="font-medium">{displayName}</span>
+            <div
+              className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-black text-white"
+              style={{ background: "linear-gradient(135deg,#580259,#7544A6)" }}
+            >
+              {username[0].toUpperCase()}
+            </div>
+            <span className="hidden sm:inline">{displayName}</span>
+          </Link>
         </div>
       </header>
 
