@@ -33,3 +33,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Runtime DB generado por backend/db.py
+backend/ai_results.db
