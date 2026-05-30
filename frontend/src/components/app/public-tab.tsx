@@ -1,13 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { useAccount, useBalance } from "wagmi";
-import { formatUnits } from "viem";
-import { monadTestnet } from "@/lib/wagmi";
-import { useMockTransaction } from "@/hooks/use-mock-transaction";
+import { useAccount, useBalance, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
+import { parseEther, formatUnits } from "viem";
+import { monadTestnet, CONTRACTS, BACKEND_URL } from "@/lib/wagmi";
+import { COMMITMENT_MANAGER_ABI, EVIDENCE_TYPES } from "@/lib/contracts";
+import type { EvidenceType } from "@/lib/contracts";
 
 type PublicCommitment = {
   id: string;
+  contractId?: number;   // on-chain ID cuando está deployado
   user: string;
   avatar: string;
   goal: string;
@@ -118,39 +120,141 @@ export default function PublicTab({ username }: { username: string }) {
   const [supported, setSupported] = useState<Set<string>>(new Set());
   const [form, setForm] = useState({ goal: "", stake: "", deadline: "", category: "Proyectos", description: "" });
 
+  const [publishEvidenceType, setPublishEvidenceType] = useState<EvidenceType>("URL");
+
   const { address, isConnected } = useAccount();
   const { data: balance } = useBalance({
     address,
     chainId: monadTestnet.id,
     query: { enabled: isConnected },
   });
-  const supportTx = useMockTransaction();
-  const publishTx = useMockTransaction();
 
   const formattedBalance = balance
     ? `${Number(formatUnits(balance.value, balance.decimals)).toFixed(2)} MON`
     : null;
 
+  const contractsDeployed = CONTRACTS.commitmentManager !== "0x0000000000000000000000000000000000000000";
+
+  // ── Contract write hooks ──────────────────────────────────────────────────
+
+  type TxStatus = "idle" | "signing" | "confirming" | "success" | "error";
+
+  const {
+    writeContractAsync: writeSupportAsync,
+    isPending: isSupportSigning,
+    data: supportHash,
+    error: supportWriteError,
+    reset: resetSupport,
+  } = useWriteContract();
+
+  const { isLoading: isSupportConfirming, isSuccess: isSupportConfirmed } =
+    useWaitForTransactionReceipt({ hash: supportHash, chainId: monadTestnet.id, query: { enabled: !!supportHash } });
+
+  const supportStatus: TxStatus = supportWriteError ? "error" : isSupportConfirmed ? "success" : isSupportConfirming ? "confirming" : isSupportSigning ? "signing" : "idle";
+
+  const {
+    writeContractAsync: writePublishAsync,
+    isPending: isPublishSigning,
+    data: publishHash,
+    error: publishWriteError,
+    reset: resetPublish,
+  } = useWriteContract();
+
+  const { isLoading: isPublishConfirming, isSuccess: isPublishConfirmed } =
+    useWaitForTransactionReceipt({ hash: publishHash, chainId: monadTestnet.id, query: { enabled: !!publishHash } });
+
+  const publishStatus: TxStatus = publishWriteError ? "error" : isPublishConfirmed ? "success" : isPublishConfirming ? "confirming" : isPublishSigning ? "signing" : "idle";
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  function Spinner() {
+    return (
+      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+      </svg>
+    );
+  }
+
+  function TxHashLink({ hash }: { hash: `0x${string}` }) {
+    return (
+      <a href={`https://monad-testnet.socialscan.io/tx/${hash}`} target="_blank" rel="noopener noreferrer" className="font-mono text-xs underline underline-offset-2" style={{ color: "#F28B0C" }}>
+        {hash.slice(0, 10)}…{hash.slice(-6)} ↗
+      </a>
+    );
+  }
+
   const filtered = selectedCategory === "Todos"
     ? MOCK_PUBLIC
     : MOCK_PUBLIC.filter((p) => p.category === selectedCategory);
 
+  // ── Handlers ─────────────────────────────────────────────────────────────
+
   async function handleSupport(e: React.FormEvent) {
     e.preventDefault();
-    if (!supportTarget || !isConnected) return;
-    await supportTx.execute();
-    setSupported((prev) => new Set([...prev, supportTarget.id]));
+    if (!supportTarget || !isConnected || !supportAmount) return;
+
+    if (contractsDeployed && supportTarget.contractId !== undefined) {
+      try {
+        await writeSupportAsync({
+          address: CONTRACTS.commitmentManager,
+          abi: COMMITMENT_MANAGER_ABI,
+          functionName: "supportCommitment",
+          args: [BigInt(supportTarget.contractId)],
+          value: parseEther(supportAmount),
+          chainId: monadTestnet.id,
+        });
+        setSupported((prev) => new Set([...prev, supportTarget.id]));
+      } catch {
+        // error en supportWriteError
+      }
+    } else {
+      // Mock: sin contractId o contratos no deployados
+      setSupported((prev) => new Set([...prev, supportTarget.id]));
+      setSupportTarget(null);
+      setSupportAmount("");
+    }
+  }
+
+  function closeSupport() {
     setSupportTarget(null);
     setSupportAmount("");
-    supportTx.reset();
+    resetSupport();
   }
 
   async function handlePublish(e: React.FormEvent) {
     e.preventDefault();
-    if (isConnected) await publishTx.execute();
+    if (!form.goal.trim() || !form.stake) return;
+
+    const deadlineTs = form.deadline
+      ? BigInt(Math.floor(new Date(form.deadline).getTime() / 1000))
+      : BigInt(0);
+
+    if (isConnected && contractsDeployed && deadlineTs > BigInt(0)) {
+      try {
+        await writePublishAsync({
+          address: CONTRACTS.commitmentManager,
+          abi: COMMITMENT_MANAGER_ABI,
+          functionName: "createCommitment",
+          args: [form.goal, deadlineTs, form.description || form.goal, publishEvidenceType, BigInt(0)],
+          value: parseEther(form.stake),
+          chainId: monadTestnet.id,
+        });
+      } catch {
+        // error en publishWriteError
+      }
+    } else {
+      // Sin wallet o contratos no deployados: cierra sin tx
+      setShowNewCommitment(false);
+      setForm({ goal: "", stake: "", deadline: "", category: "Proyectos", description: "" });
+      resetPublish();
+    }
+  }
+
+  function closePublish() {
     setShowNewCommitment(false);
     setForm({ goal: "", stake: "", deadline: "", category: "Proyectos", description: "" });
-    publishTx.reset();
+    resetPublish();
   }
 
   return (
@@ -321,24 +425,13 @@ export default function PublicTab({ username }: { username: string }) {
         </div>
       )}
 
-      {/* Support modal */}
+      {/* ── Support modal ─────────────────────────────────────────────────────── */}
       {supportTarget && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ backgroundColor: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}
-          onClick={(e) => e.target === e.currentTarget && setSupportTarget(null)}
-        >
-          <div
-            className="w-full max-w-md rounded-2xl p-6"
-            style={{ backgroundColor: "#1a0020", border: "1px solid rgba(116,68,166,0.5)" }}
-          >
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }} onClick={(e) => e.target === e.currentTarget && closeSupport()}>
+          <div className="w-full max-w-md rounded-2xl p-6" style={{ backgroundColor: "#1a0020", border: "1px solid rgba(116,68,166,0.5)" }}>
             <h2 className="font-black text-xl text-white mb-1">Apoyar compromiso</h2>
-            <p className="text-sm mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>
-              {supportTarget.user} · {supportTarget.goal.slice(0, 55)}…
-            </p>
-            <p className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.3)" }}>
-              Si cumple, recuperás tu aporte. Si no cumple, va al fondo comunitario.
-            </p>
+            <p className="text-sm mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>{supportTarget.user} · {supportTarget.goal.slice(0, 55)}…</p>
+            <p className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.3)" }}>Si cumple, recuperás tu aporte. Si no cumple, va al fondo comunitario.</p>
 
             {isConnected ? (
               <div className="flex items-center gap-2 rounded-xl px-3 py-2 mb-4 text-xs" style={{ backgroundColor: "rgba(116,68,166,0.12)", border: "1px solid rgba(116,68,166,0.3)" }}>
@@ -347,60 +440,33 @@ export default function PublicTab({ username }: { username: string }) {
                 {formattedBalance && <span className="font-bold ml-auto" style={{ color: "#F28B0C" }}>{formattedBalance}</span>}
               </div>
             ) : (
-              <div className="rounded-xl px-3 py-2 mb-4 text-xs" style={{ backgroundColor: "rgba(242,139,12,0.08)", border: "1px solid rgba(242,139,12,0.2)", color: "rgba(255,255,255,0.5)" }}>
-                Conectá tu wallet para apoyar con MON.
-              </div>
+              <div className="rounded-xl px-3 py-2 mb-4 text-xs" style={{ backgroundColor: "rgba(242,139,12,0.08)", border: "1px solid rgba(242,139,12,0.2)", color: "rgba(255,255,255,0.5)" }}>Conectá tu wallet para apoyar con MON.</div>
             )}
 
             <form onSubmit={handleSupport} className="space-y-4">
               <div>
-                <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>
-                  Monto a aportar (MON)
-                </label>
-                <input
-                  type="number"
-                  placeholder="10"
-                  min={1}
-                  value={supportAmount}
-                  onChange={(e) => setSupportAmount(e.target.value)}
-                  disabled={!isConnected}
-                  className="w-full px-4 py-3 rounded-xl text-white text-sm outline-none disabled:opacity-40"
-                  style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }}
-                  autoFocus
-                />
+                <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>Monto (MON)</label>
+                <input type="number" placeholder="10" min={1} value={supportAmount} onChange={(e) => setSupportAmount(e.target.value)} disabled={!isConnected} className="w-full px-4 py-3 rounded-xl text-white text-sm outline-none disabled:opacity-40" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} autoFocus />
               </div>
 
-              {supportTx.status === "success" && (
-                <div className="rounded-xl px-3 py-2 text-xs font-mono" style={{ backgroundColor: "rgba(242,139,12,0.1)", border: "1px solid rgba(242,139,12,0.3)", color: "#F28B0C" }}>
-                  ✓ Aporte enviado · {supportTx.txHash?.slice(0,14)}…
+              {supportStatus === "success" && supportHash && (
+                <div className="rounded-xl px-3 py-2 text-xs" style={{ backgroundColor: "rgba(242,139,12,0.1)", border: "1px solid rgba(242,139,12,0.3)" }}>
+                  ✓ Aporte on-chain · <TxHashLink hash={supportHash} />
                 </div>
+              )}
+              {supportStatus === "error" && (
+                <div className="rounded-xl px-3 py-2 text-xs" style={{ backgroundColor: "rgba(255,60,60,0.08)", border: "1px solid rgba(255,60,60,0.2)", color: "#ff9090" }}>{(supportWriteError as Error | null)?.message ?? "Error"}</div>
               )}
 
               <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => { setSupportTarget(null); supportTx.reset(); }}
-                  disabled={supportTx.status === "pending"}
-                  className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40"
-                  style={{ backgroundColor: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.6)" }}
-                >
-                  Cancelar
+                <button type="button" onClick={closeSupport} className="flex-1 py-3 rounded-xl text-sm font-semibold" style={{ backgroundColor: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.6)" }}>
+                  {supportStatus === "success" ? "Cerrar" : "Cancelar"}
                 </button>
-                <button
-                  type="submit"
-                  disabled={!isConnected || !supportAmount || Number(supportAmount) < 1 || supportTx.status === "pending"}
-                  className="flex-1 py-3 rounded-xl text-sm font-black disabled:opacity-40 flex items-center justify-center gap-2"
-                  style={{ backgroundColor: "#F28B0C", color: "#40011E" }}
-                >
-                  {supportTx.status === "pending" ? (
-                    <>
-                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                      </svg>
-                      Enviando…
-                    </>
-                  ) : `Apoyar ${supportAmount || ""} MON →`}
+                <button type="submit" disabled={!isConnected || !supportAmount || Number(supportAmount) < 1 || supportStatus === "signing" || supportStatus === "confirming" || supportStatus === "success"} className="flex-1 py-3 rounded-xl text-sm font-black disabled:opacity-40 flex items-center justify-center gap-2" style={{ backgroundColor: "#F28B0C", color: "#40011E" }}>
+                  {supportStatus === "signing"    && <><Spinner /> Firmando…</>}
+                  {supportStatus === "confirming" && <><Spinner /> Confirmando…</>}
+                  {supportStatus === "success"    && "✓ Apoyado"}
+                  {(supportStatus === "idle" || supportStatus === "error") && `Apoyar ${supportAmount || ""} MON →`}
                 </button>
               </div>
             </form>
@@ -408,113 +474,73 @@ export default function PublicTab({ username }: { username: string }) {
         </div>
       )}
 
-      {/* New public commitment modal */}
+      {/* ── Publish modal ─────────────────────────────────────────────────────── */}
       {showNewCommitment && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ backgroundColor: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}
-          onClick={(e) => e.target === e.currentTarget && setShowNewCommitment(false)}
-        >
-          <div
-            className="w-full max-w-md rounded-2xl p-6 overflow-y-auto"
-            style={{ backgroundColor: "#1a0020", border: "1px solid rgba(116,68,166,0.5)", maxHeight: "90vh" }}
-          >
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }} onClick={(e) => e.target === e.currentTarget && closePublish()}>
+          <div className="w-full max-w-md rounded-2xl p-6 overflow-y-auto" style={{ backgroundColor: "#1a0020", border: "1px solid rgba(116,68,166,0.5)", maxHeight: "90vh" }}>
             <h2 className="font-black text-xl text-white mb-1">Publicar compromiso</h2>
-            <p className="text-sm mb-5" style={{ color: "rgba(255,255,255,0.4)" }}>
-              La comunidad puede apoyarte. La IA valida el cumplimiento.
-            </p>
+            <p className="text-sm mb-4" style={{ color: "rgba(255,255,255,0.4)" }}>La comunidad puede apoyarte. La IA valida el cumplimiento.</p>
+
+            {isConnected ? (
+              <div className="flex items-center gap-2 rounded-xl px-3 py-2 mb-4 text-xs" style={{ backgroundColor: "rgba(116,68,166,0.12)", border: "1px solid rgba(116,68,166,0.3)" }}>
+                <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
+                <span className="font-mono text-white">{address?.slice(0,6)}…{address?.slice(-4)}</span>
+                {formattedBalance && <span className="font-bold ml-auto" style={{ color: "#F28B0C" }}>{formattedBalance}</span>}
+              </div>
+            ) : (
+              <div className="rounded-xl px-3 py-2 mb-4 text-xs" style={{ backgroundColor: "rgba(242,139,12,0.08)", border: "1px solid rgba(242,139,12,0.2)", color: "rgba(255,255,255,0.5)" }}>Conectá tu wallet para fondear el stake en MON.</div>
+            )}
+
             <form onSubmit={handlePublish} className="space-y-3">
-              <div>
-                <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>
-                  Objetivo (claro y verificable)
-                </label>
-                <textarea
-                  placeholder="Ej: Lanzar mi app antes del 30 de julio con al menos 10 usuarios"
-                  value={form.goal}
-                  onChange={(e) => setForm({ ...form, goal: e.target.value })}
-                  rows={2}
-                  className="w-full px-4 py-3 rounded-xl text-white text-sm outline-none resize-none"
-                  style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }}
-                />
-              </div>
-              <div>
-                <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>
-                  Descripción (contexto para la comunidad)
-                </label>
-                <textarea
-                  placeholder="¿Por qué es importante para vos? ¿Qué evidencia vas a presentar?"
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  rows={2}
-                  className="w-full px-4 py-3 rounded-xl text-white text-sm outline-none resize-none"
-                  style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }}
-                />
-              </div>
+              <textarea placeholder="Objetivo claro y verificable" value={form.goal} onChange={(e) => setForm({ ...form, goal: e.target.value })} rows={2} className="w-full px-4 py-3 rounded-xl text-white text-sm outline-none resize-none" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} />
+              <textarea placeholder="¿Por qué es importante? ¿Qué evidencia presentarás?" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} className="w-full px-4 py-3 rounded-xl text-white text-sm outline-none resize-none" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} />
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>
-                    Categoría
-                  </label>
-                  <select
-                    value={form.category}
-                    onChange={(e) => setForm({ ...form, category: e.target.value })}
-                    className="w-full px-3 py-2.5 rounded-xl text-white text-sm outline-none"
-                    style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)", colorScheme: "dark" }}
-                  >
-                    {CATEGORIES.filter((c) => c !== "Todos").map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
+                  <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>Categoría</label>
+                  <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="w-full px-3 py-2.5 rounded-xl text-white text-sm outline-none" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)", colorScheme: "dark" }}>
+                    {CATEGORIES.filter((c) => c !== "Todos").map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>
-                    Stake personal (USD)
-                  </label>
-                  <input
-                    type="number"
-                    placeholder="100"
-                    min={1}
-                    value={form.stake}
-                    onChange={(e) => setForm({ ...form, stake: e.target.value })}
-                    className="w-full px-3 py-2.5 rounded-xl text-white text-sm outline-none"
-                    style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }}
-                  />
+                  <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>Tipo evidencia</label>
+                  <select value={publishEvidenceType} onChange={(e) => setPublishEvidenceType(e.target.value as EvidenceType)} className="w-full px-3 py-2.5 rounded-xl text-white text-sm outline-none" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)", colorScheme: "dark" }}>
+                    {EVIDENCE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
                 </div>
               </div>
-              <div>
-                <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>
-                  Fecha límite
-                </label>
-                <input
-                  type="date"
-                  value={form.deadline}
-                  onChange={(e) => setForm({ ...form, deadline: e.target.value })}
-                  className="w-full px-4 py-2.5 rounded-xl text-white text-sm outline-none"
-                  style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)", colorScheme: "dark" }}
-                />
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>Stake (MON)</label>
+                  <input type="number" placeholder="100" min={1} value={form.stake} onChange={(e) => setForm({ ...form, stake: e.target.value })} disabled={!isConnected} className="w-full px-3 py-2.5 rounded-xl text-white text-sm outline-none disabled:opacity-40" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} />
+                </div>
+                <div>
+                  <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>Fecha límite</label>
+                  <input type="date" value={form.deadline} onChange={(e) => setForm({ ...form, deadline: e.target.value })} className="w-full px-3 py-2.5 rounded-xl text-white text-sm outline-none" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)", colorScheme: "dark" }} />
+                </div>
               </div>
-              <div
-                className="rounded-xl p-3 text-xs"
-                style={{ backgroundColor: "rgba(116,68,166,0.1)", border: "1px solid rgba(116,68,166,0.2)", color: "rgba(255,255,255,0.45)" }}
-              >
-                Al publicar, tu stake queda en escrow. La IA evalúa tu evidencia al vencimiento.
-              </div>
+
+              {publishStatus === "success" && publishHash && (
+                <div className="rounded-xl px-3 py-2 text-xs" style={{ backgroundColor: "rgba(242,139,12,0.1)", border: "1px solid rgba(242,139,12,0.3)" }}>
+                  ✓ Publicado on-chain · <TxHashLink hash={publishHash} />
+                </div>
+              )}
+              {publishStatus === "error" && (
+                <div className="rounded-xl px-3 py-2 text-xs" style={{ backgroundColor: "rgba(255,60,60,0.08)", border: "1px solid rgba(255,60,60,0.2)", color: "#ff9090" }}>{(publishWriteError as Error | null)?.message ?? "Error"}</div>
+              )}
+
               <div className="flex gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setShowNewCommitment(false)}
-                  className="flex-1 py-3 rounded-xl text-sm font-semibold"
-                  style={{ backgroundColor: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.6)" }}
-                >
-                  Cancelar
+                <button type="button" onClick={closePublish} disabled={publishStatus === "signing" || publishStatus === "confirming"} className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40" style={{ backgroundColor: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.6)" }}>
+                  {publishStatus === "success" ? "Cerrar" : "Cancelar"}
                 </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-3 rounded-xl text-sm font-black disabled:opacity-40"
-                  style={{ backgroundColor: "#F28B0C", color: "#40011E" }}
-                  disabled={!form.goal.trim() || !form.stake}
-                >
-                  Publicar →
+                <button type="submit" disabled={!form.goal.trim() || !form.stake || publishStatus === "signing" || publishStatus === "confirming" || publishStatus === "success"} className="flex-1 py-3 rounded-xl text-sm font-black disabled:opacity-40 flex items-center justify-center gap-2" style={{ backgroundColor: "#F28B0C", color: "#40011E" }}>
+                  {publishStatus === "signing"    && <><Spinner /> Firmando…</>}
+                  {publishStatus === "confirming" && <><Spinner /> Confirmando…</>}
+                  {publishStatus === "success"    && "✓ Publicado on-chain"}
+                  {(publishStatus === "idle" || publishStatus === "error") && (
+                    isConnected && form.stake ? `Publicar + Stake ${form.stake} MON →` : "Publicar →"
+                  )}
                 </button>
               </div>
             </form>

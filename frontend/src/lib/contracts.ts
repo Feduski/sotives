@@ -144,3 +144,7 @@ export const COMMITMENT_STATUS = {
   2: "Fulfilled",
   3: "Failed",
 } as const;
+
+// Tipos de evidencia que acepta el backend (ValidatorAgent)
+export const EVIDENCE_TYPES = ["URL", "TEXT", "GITHUB", "IMAGEN"] as const;
+export type EvidenceType = (typeof EVIDENCE_TYPES)[number];
