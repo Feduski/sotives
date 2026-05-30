@@ -40,6 +40,24 @@ API disponible en http://localhost:8000
 
 ### Contratos (opcional)
 
+Instalar Foundry en Windows (Git Bash):
+
+```bash
+curl -L https://foundry.paradigm.xyz | bash
+~/.foundry/bin/foundryup
+```
+
+Si queres usar `forge` desde PowerShell, agrega `C:\Users\TU_USUARIO\.foundry\bin` al PATH.
+
+macOS/Linux:
+
+```bash
+curl -L https://foundry.paradigm.xyz | bash
+foundryup
+```
+
+Luego:
+
 ```bash
 cd contracts
 forge build

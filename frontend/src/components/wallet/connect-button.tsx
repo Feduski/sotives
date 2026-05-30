@@ -3,9 +3,10 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import {
-  useAccount,
+  useConnection,
   useBalance,
   useConnect,
+  useConnectors,
   useDisconnect,
   useChainId,
   useSwitchChain,
@@ -22,21 +23,31 @@ export default function ConnectButton() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const { address, isConnected } = useAccount();
+  const { address, isConnected } = useConnection();
   const chainId = useChainId();
   const { data: balance } = useBalance({
     address,
     chainId: monadTestnet.id,
     query: { enabled: isConnected },
   });
-  const { connectors, connect, isPending: isConnecting } = useConnect();
-  const { disconnect } = useDisconnect();
-  const { switchChain, isPending: isSwitching } = useSwitchChain();
+
+  const connectors = useConnectors();
+  const { mutate: connect, isPending: isConnecting, error: connectError, reset: resetConnect } = useConnect();
+  const { mutate: disconnect } = useDisconnect();
+  const { mutate: switchChain, isPending: isSwitching } = useSwitchChain();
 
   const isWrongNetwork = isConnected && chainId !== monadTestnet.id;
   const formattedBalance = balance
     ? `${Number(formatUnits(balance.value, balance.decimals)).toFixed(2)} MON`
     : "— MON";
+
+  // Close modal when connection succeeds
+  useEffect(() => {
+    if (isConnected && modalOpen) {
+      setModalOpen(false);
+      resetConnect();
+    }
+  }, [isConnected, modalOpen, resetConnect]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -48,6 +59,13 @@ export default function ConnectButton() {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  function handleCloseModal() {
+    if (!isConnecting) {
+      setModalOpen(false);
+      resetConnect();
+    }
+  }
 
   // Wrong network state
   if (isWrongNetwork) {
@@ -124,25 +142,29 @@ export default function ConnectButton() {
   }
 
   // Disconnected state
+  const uniqueConnectors = connectors.filter(
+    (c, i, arr) => arr.findIndex((x) => x.name === c.name) === i
+  );
+
   return (
     <>
       <button
         onClick={() => setModalOpen(true)}
         disabled={isConnecting}
-        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold transition-colors"
+        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold transition-colors disabled:opacity-60"
         style={{ backgroundColor: "#F28B0C", color: "#40011E" }}
       >
         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18-3a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6m18 0V5.25A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25V6" />
         </svg>
-        Conectar Wallet
+        {isConnecting ? "Conectando…" : "Conectar Wallet"}
       </button>
 
       {modalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ backgroundColor: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
-          onClick={(e) => e.target === e.currentTarget && setModalOpen(false)}
+          onClick={(e) => e.target === e.currentTarget && handleCloseModal()}
         >
           <div
             className="w-full max-w-sm rounded-2xl p-6"
@@ -151,8 +173,9 @@ export default function ConnectButton() {
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-black text-xl text-white">Conectar Wallet</h2>
               <button
-                onClick={() => setModalOpen(false)}
-                className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-white/10"
+                onClick={handleCloseModal}
+                disabled={isConnecting}
+                className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-white/10 disabled:opacity-40"
                 style={{ color: "rgba(255,255,255,0.4)" }}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
@@ -173,33 +196,54 @@ export default function ConnectButton() {
               </div>
             </div>
 
+            {/* Error display */}
+            {connectError && (
+              <div
+                className="rounded-xl px-3 py-2.5 mb-4 text-xs"
+                style={{ backgroundColor: "rgba(255,60,60,0.08)", border: "1px solid rgba(255,60,60,0.2)", color: "#ff9090" }}
+              >
+                {connectError.message.includes("User rejected")
+                  ? "Rechazaste la conexión en MetaMask."
+                  : connectError.message.includes("already pending")
+                  ? "Ya hay una solicitud pendiente en MetaMask."
+                  : connectError.message.slice(0, 120)}
+              </div>
+            )}
+
             {/* Connectors */}
             <div className="space-y-2">
-              {connectors
-                .filter((c, i, arr) => arr.findIndex((x) => x.name === c.name) === i)
-                .map((connector) => (
-                  <button
-                    key={connector.uid}
-                    onClick={() => {
-                      connect({ connector, chainId: monadTestnet.id });
-                      setModalOpen(false);
-                    }}
-                    disabled={isConnecting}
-                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-white transition-colors hover:bg-white/5 disabled:opacity-50"
-                    style={{ backgroundColor: "rgba(255,255,255,0.06)", border: "1px solid rgba(116,68,166,0.3)" }}
+              {uniqueConnectors.length === 0 && (
+                <p className="text-center text-sm py-4" style={{ color: "rgba(255,255,255,0.4)" }}>
+                  No se detectó ninguna wallet. Instalá MetaMask.
+                </p>
+              )}
+              {uniqueConnectors.map((connector) => (
+                <button
+                  key={connector.uid}
+                  onClick={() => connect({ connector, chainId: monadTestnet.id })}
+                  disabled={isConnecting}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-white transition-colors hover:bg-white/5 disabled:opacity-50"
+                  style={{ backgroundColor: "rgba(255,255,255,0.06)", border: "1px solid rgba(116,68,166,0.3)" }}
+                >
+                  <div
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-base flex-shrink-0"
+                    style={{ backgroundColor: "rgba(116,68,166,0.25)" }}
                   >
-                    <div
-                      className="w-8 h-8 rounded-lg flex items-center justify-center text-base"
-                      style={{ backgroundColor: "rgba(116,68,166,0.25)" }}
-                    >
-                      {connector.name.includes("MetaMask") ? "🦊" : "🔌"}
-                    </div>
-                    <span>{connector.name}</span>
-                    <svg className="w-4 h-4 ml-auto opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    {connector.name.toLowerCase().includes("metamask") ? "🦊" : "🔌"}
+                  </div>
+                  <span className="flex-1 text-left">{connector.name}</span>
+                  {isConnecting ? (
+                    <svg className="w-4 h-4 animate-spin opacity-60" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4 opacity-40" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
                     </svg>
-                  </button>
-                ))}
+                  )}
+                </button>
+              ))}
             </div>
 
             <p className="text-xs mt-4 text-center" style={{ color: "rgba(255,255,255,0.25)" }}>

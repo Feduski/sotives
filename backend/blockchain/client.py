@@ -1,5 +1,7 @@
 """Cliente Web3 para los contratos de soTives en Monad Testnet."""
 
+from typing import Optional
+
 from web3 import AsyncWeb3
 from web3.middleware import ExtraDataToPOAMiddleware
 from eth_account import Account
@@ -34,7 +36,7 @@ class MonadClient:
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 
-    async def _send_tx(self, fn, caller: Account | None = None) -> str:
+    async def _send_tx(self, fn, caller: Optional[Account] = None) -> str:
         """Construye, firma y envía una transacción. Retorna tx hash."""
         acct = caller or self.account
         nonce = await self.w3.eth.get_transaction_count(acct.address)

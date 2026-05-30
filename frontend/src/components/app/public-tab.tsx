@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useAccount, useBalance, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
+import { useConnection, useBalance, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { parseEther, formatUnits } from "viem";
 import { monadTestnet, CONTRACTS, BACKEND_URL } from "@/lib/wagmi";
 import { COMMITMENT_MANAGER_ABI, EVIDENCE_TYPES } from "@/lib/contracts";
@@ -122,7 +122,7 @@ export default function PublicTab({ username }: { username: string }) {
 
   const [publishEvidenceType, setPublishEvidenceType] = useState<EvidenceType>("URL");
 
-  const { address, isConnected } = useAccount();
+  const { address, isConnected } = useConnection();
   const { data: balance } = useBalance({
     address,
     chainId: monadTestnet.id,
@@ -133,7 +133,10 @@ export default function PublicTab({ username }: { username: string }) {
     ? `${Number(formatUnits(balance.value, balance.decimals)).toFixed(2)} MON`
     : null;
 
-  const contractsDeployed = CONTRACTS.commitmentManager !== "0x0000000000000000000000000000000000000000";
+  const contractsDeployed = !!(
+    CONTRACTS.commitmentManager &&
+    CONTRACTS.commitmentManager !== "0x0000000000000000000000000000000000000000"
+  );
 
   // ── Contract write hooks ──────────────────────────────────────────────────
 

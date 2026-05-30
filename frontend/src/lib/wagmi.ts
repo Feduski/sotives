@@ -1,5 +1,5 @@
 import { createConfig, http } from "wagmi";
-import { injected, metaMask } from "wagmi/connectors";
+import { injected } from "wagmi/connectors";
 import { monadTestnet } from "viem/chains";
 
 export { monadTestnet };
@@ -8,7 +8,6 @@ export const wagmiConfig = createConfig({
   chains: [monadTestnet],
   connectors: [
     injected({ shimDisconnect: true }),
-    metaMask(),
   ],
   transports: {
     [monadTestnet.id]: http("https://testnet-rpc.monad.xyz"),

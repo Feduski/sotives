@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { useAccount, useBalance } from "wagmi";
+import { useConnection, useBalance } from "wagmi";
 import { formatUnits } from "viem";
 import { monadTestnet } from "@/lib/wagmi";
 import ConnectButton from "@/components/wallet/connect-button";
@@ -44,7 +44,7 @@ export default function ProfilePage() {
   const [groupFilter, setGroupFilter] = useState("Todos");
   const [statusFilter, setStatusFilter] = useState<"todos" | "en curso" | "cumplido">("todos");
 
-  const { address, isConnected } = useAccount();
+  const { address, isConnected } = useConnection();
   const { data: balanceData } = useBalance({
     address,
     chainId: monadTestnet.id,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useAccount, useBalance, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
+import { useConnection, useBalance, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { parseEther, keccak256, toBytes, formatUnits } from "viem";
 import { monadTestnet, CONTRACTS, BACKEND_URL } from "@/lib/wagmi";
 import { COMMITMENT_MANAGER_ABI, EVIDENCE_TYPES } from "@/lib/contracts";
@@ -113,7 +113,7 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
   const [validationResult, setValidationResult] = useState<{ fulfilled: boolean; confidence: number; reasoning: string } | null>(null);
 
   // Wallet
-  const { address, isConnected } = useAccount();
+  const { address, isConnected } = useConnection();
   const { data: balance } = useBalance({ address, chainId: monadTestnet.id, query: { enabled: isConnected } });
   const formattedBalance = balance ? `${Number(formatUnits(balance.value, balance.decimals)).toFixed(2)} MON` : null;
 
@@ -124,7 +124,10 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
-  const contractsDeployed = CONTRACTS.commitmentManager !== "0x0000000000000000000000000000000000000000";
+  const contractsDeployed = !!(
+    CONTRACTS.commitmentManager &&
+    CONTRACTS.commitmentManager !== "0x0000000000000000000000000000000000000000"
+  );
 
   function closeCommitmentModal() {
     setModal(null);
