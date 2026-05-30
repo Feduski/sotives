@@ -57,6 +57,8 @@ class MonadClient:
 
     async def get_commitment(self, commitment_id: int) -> dict:
         c = await self.commitment_manager.functions.getCommitment(commitment_id).call()
+        # Soporte para contrato viejo (9 campos) y nuevo (10 campos con joinPrice)
+        join_price_wei = c[9] if len(c) > 9 else 0
         return {
             "id": commitment_id,
             "creator": c[0],
@@ -69,8 +71,8 @@ class MonadClient:
             "evidence_type": c[6],
             "evidence_hash": c[7].hex(),
             "group_id": c[8],
-            "join_price_wei": c[9],
-            "join_price_mon": float(self.w3.from_wei(c[9], "ether")),
+            "join_price_wei": join_price_wei,
+            "join_price_mon": float(self.w3.from_wei(join_price_wei, "ether")),
         }
 
     async def get_user_commitments(self, address: str) -> list[dict]:
