@@ -135,6 +135,13 @@ export const GROUP_MULTISIG_ABI = [
     ],
     outputs: [{ name: "", type: "bool" }],
   },
+  {
+    name: "nextGroupId",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
 ] as const;
 
 // Status del compromiso (mismo orden que el enum en Solidity)

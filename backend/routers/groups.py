@@ -12,6 +12,20 @@ from dependencies import get_monad_client
 router = APIRouter(prefix="/groups", tags=["groups"])
 
 
+# ─── Rutas fijas ───────────────────────────────────────────────────────────────
+
+@router.get("/next-id")
+async def get_next_group_id(
+    client: MonadClient = Depends(get_monad_client),
+):
+    """Retorna el próximo groupId. El frontend lo lee antes de llamar createGroup."""
+    try:
+        next_id = await client.get_next_group_id()
+        return {"next_group_id": next_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ─── Schemas ───────────────────────────────────────────────────────────────────
 
 class ProposeActionRequest(BaseModel):

@@ -92,6 +92,20 @@ class MonadClient:
     async def get_next_commitment_id(self) -> int:
         return await self.commitment_manager.functions.nextCommitmentId().call()
 
+    async def get_all_commitments(self, max_scan: int = 300) -> list[dict]:
+        """Itera todos los IDs creados y retorna sus datos. Ignora los que fallen."""
+        try:
+            next_id = await self.get_next_commitment_id()
+        except Exception:
+            return []
+        result = []
+        for cid in range(0, min(next_id, max_scan)):
+            try:
+                result.append(await self.get_commitment(cid))
+            except Exception:
+                continue
+        return result
+
     async def get_ai_agent(self) -> str:
         return await self.commitment_manager.functions.aiAgent().call()
 
@@ -112,6 +126,9 @@ class MonadClient:
         return float(self.w3.from_wei(wei, "ether"))
 
     # ── GroupMultisig ──────────────────────────────────────────────────────────
+
+    async def get_next_group_id(self) -> int:
+        return await self.group_multisig.functions.nextGroupId().call()
 
     async def get_group(self, group_id: int) -> dict:
         name, members, required = await self.group_multisig.functions.getGroup(group_id).call()

@@ -1,74 +1,59 @@
 "use client";
 
 import { useState } from "react";
-import { useConnection, useBalance, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
+import {
+  useConnection, useBalance,
+  useWriteContract, useWaitForTransactionReceipt,
+} from "wagmi";
 import { parseEther, keccak256, toBytes, formatUnits } from "viem";
 import { monadTestnet, CONTRACTS, BACKEND_URL } from "@/lib/wagmi";
-import { COMMITMENT_MANAGER_ABI, EVIDENCE_TYPES } from "@/lib/contracts";
+import { COMMITMENT_MANAGER_ABI, GROUP_MULTISIG_ABI, EVIDENCE_TYPES } from "@/lib/contracts";
 import type { EvidenceType } from "@/lib/contracts";
+import {
+  useGroups, useGroupData, useGroupCommitments, useAiResult,
+} from "@/hooks/use-groups";
+import type { LocalGroup, GroupCommitment } from "@/hooks/use-groups";
 
-// ── Types ──────────────────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
-type Group = {
-  id: string;
-  name: string;
-  emoji: string;
-  members: string[];
-  activeCommitments: number;
-  completionRate: number;
-  code: string;
-};
+const EMOJIS = ["💪", "📚", "🎯", "⚡", "🌟", "🚀", "🏃", "🎨"];
 
-type Commitment = {
-  id: string;
-  contractId?: number;       // on-chain ID cuando existe
-  groupId: string;
-  user: string;
-  goal: string;
-  stake: number;
-  deadline: string;
-  status: "en curso" | "cumplido" | "fallido";
-  daysLeft: number;
-};
-
-// ── Mock data ──────────────────────────────────────────────────────────────────
-
-const MOCK_GROUPS: Group[] = [
-  { id: "1", name: "Runners Matutinos", emoji: "🏃", members: ["@fede", "@lucas", "@sofi", "@martin"], activeCommitments: 3, completionRate: 82, code: "RUN24" },
-  { id: "2", name: "Startup Launch Squad", emoji: "🚀", members: ["@fede", "@ana", "@diego"], activeCommitments: 5, completionRate: 91, code: "SLS99" },
-];
-
-const MOCK_COMMITMENTS: Commitment[] = [
-  { id: "c1", groupId: "1", user: "@lucas",  goal: "Correr 5km tres veces por semana durante 4 semanas", stake: 50,  deadline: "14 jun", status: "en curso", daysLeft: 12 },
-  { id: "c2", groupId: "1", user: "@sofi",   goal: "No faltar al gym por 30 días consecutivos",           stake: 80,  deadline: "28 jun", status: "en curso", daysLeft: 26 },
-  { id: "c3", groupId: "1", user: "@martin", goal: "Meditar 10 minutos diarios por 21 días",              stake: 30,  deadline: "10 jun", status: "cumplido", daysLeft: 0 },
-  { id: "c4", groupId: "2", user: "@ana",    goal: "Lanzar landing page antes del 15 de junio",           stake: 200, deadline: "15 jun", status: "cumplido", daysLeft: 0 },
-  { id: "c5", groupId: "2", user: "@diego",  goal: "Conseguir 100 usuarios en lista de espera",           stake: 300, deadline: "30 jun", status: "en curso", daysLeft: 28 },
-  { id: "c6", groupId: "2", user: "@fede",   goal: "Completar backend MVP con auth y smart contracts",    stake: 400, deadline: "30 jun", status: "en curso", daysLeft: 28 },
-];
-
-function fmtDeadline(dt: string): string {
-  if (!dt) return "—";
-  const d = new Date(dt);
-  return d.toLocaleString("es-AR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+function shortAddr(addr: string) {
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
-// ── Tx status helper ───────────────────────────────────────────────────────────
+function fmtDeadline(ts: number) {
+  if (!ts) return "—";
+  return new Date(ts * 1000).toLocaleString("es-AR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+function daysLeft(ts: number) {
+  return Math.max(0, Math.ceil((ts * 1000 - Date.now()) / 86_400_000));
+}
+
+function statusLabel(s: GroupCommitment["status"]) {
+  if (s === "Fulfilled") return "cumplido";
+  if (s === "Failed") return "fallido";
+  if (s === "EvidenceSubmitted") return "en revisión";
+  return "en curso";
+}
+
+function statusColor(s: GroupCommitment["status"]) {
+  if (s === "Fulfilled") return { bg: "rgba(242,139,12,0.15)", text: "#F28B0C" };
+  if (s === "Failed") return { bg: "rgba(255,60,60,0.15)", text: "#ff7070" };
+  return { bg: "rgba(116,68,166,0.2)", text: "#c084fc" };
+}
 
 type TxStatus = "idle" | "signing" | "confirming" | "success" | "error";
 
 function useTx() {
   const { writeContractAsync, isPending: isSigning, data: hash, error: writeError, reset } = useWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
-    hash,
-    chainId: monadTestnet.id,
-    query: { enabled: !!hash },
+    hash, chainId: monadTestnet.id, query: { enabled: !!hash },
   });
   const status: TxStatus = writeError ? "error" : isSuccess ? "success" : isConfirming ? "confirming" : isSigning ? "signing" : "idle";
   return { writeContractAsync, status, hash, error: (writeError as Error | null)?.message, reset };
 }
-
-// ── Spinner ────────────────────────────────────────────────────────────────────
 
 function Spinner() {
   return (
@@ -79,72 +64,194 @@ function Spinner() {
   );
 }
 
-// ── TxHashLink ─────────────────────────────────────────────────────────────────
-
 function TxHashLink({ hash }: { hash: `0x${string}` }) {
   return (
-    <a
-      href={`https://monad-testnet.socialscan.io/tx/${hash}`}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="font-mono text-xs underline underline-offset-2"
-      style={{ color: "#F28B0C" }}
-    >
+    <a href={`https://monad-testnet.socialscan.io/tx/${hash}`} target="_blank" rel="noopener noreferrer" className="font-mono text-xs underline underline-offset-2" style={{ color: "#F28B0C" }}>
       {hash.slice(0, 10)}…{hash.slice(-6)} ↗
     </a>
   );
 }
 
-// ── Modal backdrop ─────────────────────────────────────────────────────────────
+// ── AI Result badge (lazy loaded per commitment) ───────────────────────────────
 
-type ModalType = "create" | "join" | "commitment" | null;
+function AiResultBadge({ commitmentId, status }: { commitmentId: number; status: GroupCommitment["status"] }) {
+  const [open, setOpen] = useState(false);
+  const resolved = status === "Fulfilled" || status === "Failed";
+  const { data } = useAiResult(commitmentId, resolved);
+  if (!resolved || !data) return null;
+  return (
+    <div>
+      <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-1.5 text-xs font-medium" style={{ color: status === "Fulfilled" ? "#F28B0C" : "#ff9090" }}>
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15M14.25 3.104c.251.023.501.05.75.082M19.8 15l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.607L5 14.5m14.8.5l1.196 4.784M5 14.5L3.804 19.284M12 12h.01" /></svg>
+        IA · {Math.round(data.confidence * 100)}% confianza {open ? "▲" : "▼"}
+      </button>
+      {open && (
+        <div className="mt-2 rounded-xl p-3 text-xs leading-relaxed" style={{ backgroundColor: "rgba(116,68,166,0.1)", border: "1px solid rgba(116,68,166,0.2)", color: "rgba(255,255,255,0.6)" }}>
+          {data.reasoning}
+          {data.tx_hash && (
+            <div className="mt-2">
+              <TxHashLink hash={data.tx_hash as `0x${string}`} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
-export default function PrivateGroupsTab({ username }: { username: string }) {
-  const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
-  const [modal, setModal] = useState<ModalType>(null);
-  const [joinCode, setJoinCode] = useState("");
-  const [newGroupName, setNewGroupName] = useState("");
-  const [newCommitment, setNewCommitment] = useState({
-    goal: "", stake: "0.0005", deadline: "", criteria: "", evidenceType: "URL" as EvidenceType,
-  });
-  const [groups, setGroups] = useState<Group[]>(MOCK_GROUPS);
-  const [commitments, setCommitments] = useState<Commitment[]>(MOCK_COMMITMENTS);
-  const [fundTarget, setFundTarget] = useState<Commitment | null>(null);
+// ── Group detail (inner component) ────────────────────────────────────────────
+
+function GroupDetail({
+  localGroup,
+  userAddress,
+  username,
+  isConnected,
+  contractsDeployed,
+  formattedBalance,
+  onBack,
+}: {
+  localGroup: LocalGroup;
+  userAddress?: string;
+  username: string;
+  isConnected: boolean;
+  contractsDeployed: boolean;
+  formattedBalance: string | null;
+  onBack: () => void;
+}) {
+  const { data: groupData, isLoading: groupLoading } = useGroupData(localGroup.id);
+  const { data: commitmentsData, isLoading: cLoading, refetch: refetchCommitments } = useGroupCommitments(localGroup.id);
+
+  const commitments = commitmentsData?.commitments ?? [];
+
+  const [modal, setModal] = useState<"commitment" | "fund" | "evidence" | null>(null);
+  const [fundTarget, setFundTarget] = useState<GroupCommitment | null>(null);
   const [fundAmount, setFundAmount] = useState("");
-
-  // Evidence submission
-  const [evidenceTarget, setEvidenceTarget] = useState<Commitment | null>(null);
+  const [evidenceTarget, setEvidenceTarget] = useState<GroupCommitment | null>(null);
   const [evidenceForm, setEvidenceForm] = useState({ type: "URL" as EvidenceType, value: "" });
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<{ fulfilled: boolean; confidence: number; reasoning: string } | null>(null);
+  const [newCommitment, setNewCommitment] = useState({ goal: "", stake: "0.0005", deadline: "", criteria: "", evidenceType: "URL" as EvidenceType });
 
-  // Wallet
-  const { address, isConnected } = useConnection();
-  const { data: balance } = useBalance({ address, chainId: monadTestnet.id, query: { enabled: isConnected } });
-  const formattedBalance = balance ? `${Number(formatUnits(balance.value, balance.decimals)).toFixed(2)} MON` : null;
-
-  // Contract write hooks — one instance per action
+  // Tx hooks
   const createTx  = useTx();
   const fundTx    = useTx();
   const evidenceTx = useTx();
 
-  // ── Helpers ──────────────────────────────────────────────────────────────────
+  // Pre-read nextCommitmentId so we know the ID after tx
+  const [pendingCommitmentId, setPendingCommitmentId] = useState<number | null>(null);
 
-  const contractsDeployed = !!(
-    CONTRACTS.commitmentManager &&
-    CONTRACTS.commitmentManager !== "0x0000000000000000000000000000000000000000"
-  );
+  async function fetchNextCommitmentId(): Promise<number> {
+    const res = await fetch(`${BACKEND_URL}/commitments/next-id`);
+    const data = await res.json();
+    return data.next_commitment_id as number;
+  }
+
+  async function handleCreateCommitment(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newCommitment.goal.trim()) return;
+    const stakeAmt = Number(newCommitment.stake) || 0;
+    const deadlineTs = newCommitment.deadline
+      ? BigInt(Math.floor(new Date(newCommitment.deadline).getTime() / 1000))
+      : BigInt(0);
+    const criteria = newCommitment.criteria.trim() || newCommitment.goal;
+
+    if (isConnected && stakeAmt > 0 && contractsDeployed && deadlineTs > BigInt(0)) {
+      try {
+        // Read next ID before tx so we know it after confirmation
+        const nextId = await fetchNextCommitmentId();
+        setPendingCommitmentId(nextId);
+
+        await createTx.writeContractAsync({
+          address: CONTRACTS.commitmentManager,
+          abi: COMMITMENT_MANAGER_ABI,
+          functionName: "createCommitment",
+          args: [newCommitment.goal, deadlineTs, criteria, newCommitment.evidenceType, BigInt(localGroup.id)],
+          value: parseEther(String(stakeAmt)),
+          chainId: monadTestnet.id,
+        });
+      } catch { /* error en createTx.error */ }
+    }
+  }
+
+  // After commitment tx success → refresh
+  if (createTx.status === "success" && createTx.hash) {
+    setTimeout(() => { refetchCommitments(); }, 4000);
+  }
 
   function closeCommitmentModal() {
     setModal(null);
     setNewCommitment({ goal: "", stake: "0.0005", deadline: "", criteria: "", evidenceType: "URL" });
+    setPendingCommitmentId(null);
     createTx.reset();
+  }
+
+  async function handleFund(e: React.FormEvent) {
+    e.preventDefault();
+    if (!fundTarget || !fundAmount || !isConnected || !contractsDeployed) return;
+    try {
+      await fundTx.writeContractAsync({
+        address: CONTRACTS.commitmentManager,
+        abi: COMMITMENT_MANAGER_ABI,
+        functionName: "supportCommitment",
+        args: [BigInt(fundTarget.id)],
+        value: parseEther(fundAmount),
+        chainId: monadTestnet.id,
+      });
+    } catch { /* error en fundTx.error */ }
   }
 
   function closeFundModal() {
     setFundTarget(null);
     setFundAmount("");
     fundTx.reset();
+  }
+
+  async function handleSubmitEvidence(e: React.FormEvent) {
+    e.preventDefault();
+    if (!evidenceTarget || !evidenceForm.value.trim()) return;
+
+    // Paso 1: registrar hash on-chain
+    if (isConnected && contractsDeployed) {
+      try {
+        const evidenceHash = keccak256(toBytes(evidenceForm.value.trim()));
+        await evidenceTx.writeContractAsync({
+          address: CONTRACTS.commitmentManager,
+          abi: COMMITMENT_MANAGER_ABI,
+          functionName: "submitEvidence",
+          args: [BigInt(evidenceTarget.id), evidenceHash],
+          chainId: monadTestnet.id,
+        });
+      } catch {
+        return;
+      }
+    }
+
+    // Paso 2: agente IA valida
+    setValidating(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/commitments/validate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          commitment_id: evidenceTarget.id,
+          evidence_type: evidenceForm.type,
+          evidence_value: evidenceForm.value.trim(),
+          auto_resolve: true,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setValidationResult({ fulfilled: data.fulfilled, confidence: data.confidence, reasoning: data.reasoning });
+        setTimeout(() => refetchCommitments(), 4000);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setValidationResult({ fulfilled: false, confidence: 0, reasoning: err?.detail?.reasoning ?? "Error en el servidor." });
+      }
+    } catch {
+      setValidationResult({ fulfilled: false, confidence: 0, reasoning: "Backend no disponible." });
+    } finally {
+      setValidating(false);
+    }
   }
 
   function closeEvidenceModal() {
@@ -155,367 +262,149 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
     setValidationResult(null);
   }
 
-  // ── Handlers ─────────────────────────────────────────────────────────────────
-
-  function handleCreateGroup(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newGroupName.trim()) return;
-    const emojis = ["💪", "📚", "🎯", "⚡", "🌟"];
-    setGroups([...groups, {
-      id: String(groups.length + 1),
-      name: newGroupName.trim(),
-      emoji: emojis[Math.floor(Math.random() * emojis.length)],
-      members: [username],
-      activeCommitments: 0,
-      completionRate: 0,
-      code: Math.random().toString(36).slice(2, 6).toUpperCase(),
-    }]);
-    setModal(null);
-    setNewGroupName("");
-  }
-
-  function handleJoin(e: React.FormEvent) {
-    e.preventDefault();
-    setModal(null);
-    setJoinCode("");
-  }
-
-  async function handleAddCommitment(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newCommitment.goal.trim() || !selectedGroup) return;
-
-    const stakeAmount = Number(newCommitment.stake) || 0;
-    const deadlineTs = newCommitment.deadline
-      ? BigInt(Math.floor(new Date(newCommitment.deadline).getTime() / 1000))
-      : BigInt(0);
-    const criteria = newCommitment.criteria.trim() || newCommitment.goal.trim();
-    const groupId  = BigInt(parseInt(selectedGroup.id, 10));
-
-    if (isConnected && stakeAmount > 0 && contractsDeployed && deadlineTs > BigInt(0)) {
-      try {
-        await createTx.writeContractAsync({
-          address: CONTRACTS.commitmentManager,
-          abi: COMMITMENT_MANAGER_ABI,
-          functionName: "createCommitment",
-          args: [newCommitment.goal, deadlineTs, criteria, newCommitment.evidenceType, groupId],
-          value: parseEther(String(stakeAmount)),
-          chainId: monadTestnet.id,
-        });
-        // Agregar optimistamente al estado local
-        setCommitments([...commitments, {
-          id: `c${commitments.length + 1}`,
-          groupId: selectedGroup.id,
-          user: username,
-          goal: newCommitment.goal.trim(),
-          stake: stakeAmount,
-          deadline: fmtDeadline(newCommitment.deadline),
-          status: "en curso",
-          daysLeft: 30,
-        }]);
-      } catch {
-        // error queda en createTx.error
-      }
-    } else {
-      // Sin wallet o sin stake: agregar sin on-chain
-      setCommitments([...commitments, {
-        id: `c${commitments.length + 1}`,
-        groupId: selectedGroup.id,
-        user: username,
-        goal: newCommitment.goal.trim(),
-        stake: stakeAmount,
-        deadline: newCommitment.deadline || "—",
-        status: "en curso",
-        daysLeft: 30,
-      }]);
-      closeCommitmentModal();
-    }
-  }
-
-  async function handleFund(e: React.FormEvent) {
-    e.preventDefault();
-    if (!fundTarget || !fundAmount) return;
-
-    if (isConnected && contractsDeployed && fundTarget.contractId !== undefined) {
-      try {
-        await fundTx.writeContractAsync({
-          address: CONTRACTS.commitmentManager,
-          abi: COMMITMENT_MANAGER_ABI,
-          functionName: "supportCommitment",
-          args: [BigInt(fundTarget.contractId)],
-          value: parseEther(fundAmount),
-          chainId: monadTestnet.id,
-        });
-      } catch {
-        // error en fundTx.error
-      }
-    }
-    // Si no hay contractId, solo cerramos (mock)
-    if (!fundTarget.contractId) closeFundModal();
-  }
-
-  async function handleSubmitEvidence(e: React.FormEvent) {
-    e.preventDefault();
-    if (!evidenceTarget || !evidenceForm.value.trim()) return;
-
-    // Paso 1: on-chain submitEvidence si hay contractId
-    if (isConnected && contractsDeployed && evidenceTarget.contractId !== undefined) {
-      try {
-        const evidenceHash = keccak256(toBytes(evidenceForm.value.trim()));
-        await evidenceTx.writeContractAsync({
-          address: CONTRACTS.commitmentManager,
-          abi: COMMITMENT_MANAGER_ABI,
-          functionName: "submitEvidence",
-          args: [BigInt(evidenceTarget.contractId), evidenceHash],
-          chainId: monadTestnet.id,
-        });
-      } catch {
-        return; // error en evidenceTx.error
-      }
-    }
-
-    // Paso 2: backend valida con IA
-    setValidating(true);
-    try {
-      const res = await fetch(`${BACKEND_URL}/commitments/validate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          commitment_id: evidenceTarget.contractId ?? 0,
-          evidence_type: evidenceForm.type,
-          evidence_value: evidenceForm.value.trim(),
-          auto_resolve: true,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setValidationResult({
-          fulfilled: data.fulfilled,
-          confidence: data.confidence,
-          reasoning: data.reasoning,
-        });
-      } else {
-        setValidationResult({ fulfilled: false, confidence: 0, reasoning: "Error en el servidor." });
-      }
-    } catch {
-      setValidationResult({ fulfilled: false, confidence: 0, reasoning: "Backend no disponible." });
-    } finally {
-      setValidating(false);
-    }
-  }
-
-  const groupCommitments = selectedGroup
-    ? commitments.filter((c) => c.groupId === selectedGroup.id)
-    : [];
-
-  // ── Render ────────────────────────────────────────────────────────────────────
-
   return (
-    <>
-      {/* ── List view ─────────────────────────────────────────────────────────── */}
-      {!selectedGroup && (
-        <div>
-          <div className="flex gap-3 mb-6">
-            <button onClick={() => setModal("create")} className="flex items-center gap-2 text-sm font-bold px-4 py-2.5 rounded-xl" style={{ backgroundColor: "#F28B0C", color: "#40011E" }}>
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-              Crear grupo
-            </button>
-            <button onClick={() => setModal("join")} className="flex items-center gap-2 text-sm font-semibold px-4 py-2.5 rounded-xl border" style={{ borderColor: "rgba(116,68,166,0.5)", color: "#c084fc" }}>
-              Unirse con código
-            </button>
-          </div>
+    <div>
+      {/* Back nav */}
+      <div className="flex items-center gap-3 mb-6">
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "rgba(255,255,255,0.5)" }}>
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" /></svg>
+          Grupos
+        </button>
+        <span style={{ color: "rgba(255,255,255,0.2)" }}>/</span>
+        <span className="text-xl">{localGroup.emoji}</span>
+        <span className="font-bold text-white">{localGroup.name}</span>
+      </div>
 
-          <div className="space-y-3">
-            {groups.map((group) => (
-              <button key={group.id} onClick={() => setSelectedGroup(group)} className="w-full text-left rounded-2xl p-5 transition-all hover:scale-[1.01]" style={{ backgroundColor: "rgba(88,2,89,0.2)", border: "1px solid rgba(116,68,166,0.3)" }}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl" style={{ backgroundColor: "rgba(116,68,166,0.2)" }}>{group.emoji}</div>
-                    <div>
-                      <p className="font-bold text-base text-white">{group.name}</p>
-                      <p className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.45)" }}>{group.members.length} miembros · {group.activeCommitments} activos</p>
-                    </div>
-                  </div>
-                  <div className="text-right ml-4">
-                    <div className="text-lg font-black" style={{ color: "#F28B0C" }}>{group.completionRate}%</div>
-                    <div className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>cumplimiento</div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1 mt-3">
-                  {group.members.slice(0, 5).map((m, i) => (
-                    <div key={i} className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black text-white border" style={{ background: "linear-gradient(135deg,#580259,#7544A6)", borderColor: "#0d0010", marginLeft: i > 0 ? "-6px" : "0" }}>{m[1].toUpperCase()}</div>
-                  ))}
-                  <span className="text-xs ml-2" style={{ color: "rgba(255,255,255,0.4)" }}>{group.members.slice(0,3).join(", ")}{group.members.length > 3 && ` +${group.members.length - 3}`}</span>
-                </div>
-                <div className="mt-3 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: "rgba(255,255,255,0.08)" }}>
-                  <div className="h-full rounded-full" style={{ width: `${group.completionRate}%`, backgroundColor: "#F28B0C" }} />
-                </div>
-              </button>
-            ))}
-          </div>
+      {/* Group info */}
+      <div className="rounded-2xl p-4 mb-6 flex flex-wrap items-center gap-4" style={{ backgroundColor: "rgba(88,2,89,0.15)", border: "1px solid rgba(116,68,166,0.2)" }}>
+        <div>
+          <p className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>Group ID (código)</p>
+          <p className="font-black text-sm tracking-widest" style={{ color: "#F28B0C" }}>#{localGroup.id}</p>
+        </div>
+        {groupData && (
+          <>
+            <div className="h-8 w-px" style={{ backgroundColor: "rgba(255,255,255,0.1)" }} />
+            <div>
+              <p className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>Miembros</p>
+              <p className="font-bold text-sm text-white">{groupData.members.map(shortAddr).join(", ")}</p>
+            </div>
+          </>
+        )}
+        <div className="ml-auto">
+          <button onClick={() => setModal("commitment")} className="flex items-center gap-2 text-sm font-bold px-4 py-2 rounded-xl" style={{ backgroundColor: "#F28B0C", color: "#40011E" }}>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+            Nuevo compromiso
+          </button>
+        </div>
+      </div>
+
+      {/* Commitments list */}
+      {cLoading && (
+        <div className="space-y-3">
+          {[1, 2].map((i) => <div key={i} className="rounded-2xl p-4 animate-pulse" style={{ backgroundColor: "rgba(88,2,89,0.15)", height: "80px" }} />)}
         </div>
       )}
 
-      {/* ── Group detail ──────────────────────────────────────────────────────── */}
-      {selectedGroup && (
-        <div>
-          <div className="flex items-center gap-3 mb-6">
-            <button onClick={() => setSelectedGroup(null)} className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "rgba(255,255,255,0.5)" }}>
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" /></svg>
-              Grupos
-            </button>
-            <span style={{ color: "rgba(255,255,255,0.2)" }}>/</span>
-            <div className="flex items-center gap-2">
-              <span className="text-xl">{selectedGroup.emoji}</span>
-              <span className="font-bold text-white">{selectedGroup.name}</span>
-            </div>
-          </div>
+      {!cLoading && commitments.length === 0 && (
+        <div className="text-center py-12" style={{ color: "rgba(255,255,255,0.3)" }}>
+          <p className="text-base font-light">Sin compromisos en este grupo.</p>
+          <p className="text-sm mt-1">Sé el primero en crear uno con stake en MON.</p>
+        </div>
+      )}
 
-          <div className="rounded-2xl p-4 mb-6 flex flex-wrap items-center gap-4" style={{ backgroundColor: "rgba(88,2,89,0.15)", border: "1px solid rgba(116,68,166,0.2)" }}>
-            <div><p className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>Miembros</p><p className="font-bold text-sm text-white">{selectedGroup.members.join(", ")}</p></div>
-            <div className="h-8 w-px" style={{ backgroundColor: "rgba(255,255,255,0.1)" }} />
-            <div><p className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>Código</p><p className="font-black text-sm tracking-widest" style={{ color: "#F28B0C" }}>{selectedGroup.code}</p></div>
-            <div className="h-8 w-px" style={{ backgroundColor: "rgba(255,255,255,0.1)" }} />
-            <div><p className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>Cumplimiento</p><p className="font-black text-sm" style={{ color: "#F28B0C" }}>{selectedGroup.completionRate}%</p></div>
-            <div className="ml-auto">
-              <button onClick={() => setModal("commitment")} className="flex items-center gap-2 text-sm font-bold px-4 py-2 rounded-xl" style={{ backgroundColor: "#F28B0C", color: "#40011E" }}>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-                Nuevo compromiso
-              </button>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            {groupCommitments.map((c) => (
-              <div key={c.id} className="rounded-2xl p-5" style={{ backgroundColor: "rgba(88,2,89,0.2)", border: `1px solid ${c.status === "cumplido" ? "rgba(242,139,12,0.3)" : "rgba(116,68,166,0.25)"}` }}>
+      {!cLoading && commitments.length > 0 && (
+        <div className="space-y-3">
+          {commitments.map((c) => {
+            const dl = daysLeft(c.deadline);
+            const sc = statusColor(c.status);
+            const isOwn = userAddress?.toLowerCase() === c.creator.toLowerCase();
+            return (
+              <div key={c.id} className="rounded-2xl p-5" style={{ backgroundColor: "rgba(88,2,89,0.2)", border: `1px solid ${c.status === "Fulfilled" ? "rgba(242,139,12,0.3)" : "rgba(116,68,166,0.25)"}` }}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-start gap-3 flex-1 min-w-0">
-                    <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-black text-white flex-shrink-0 mt-0.5" style={{ background: "linear-gradient(135deg,#580259,#7544A6)" }}>{c.user[1].toUpperCase()}</div>
+                    <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-black text-white flex-shrink-0 mt-0.5" style={{ background: "linear-gradient(135deg,#580259,#7544A6)" }}>
+                      {c.creator.slice(2, 3).toUpperCase()}
+                    </div>
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-sm font-semibold" style={{ color: "#c084fc" }}>{c.user}</span>
-                        <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: c.status === "cumplido" ? "rgba(242,139,12,0.15)" : "rgba(116,68,166,0.2)", color: c.status === "cumplido" ? "#F28B0C" : "#c084fc" }}>{c.status}</span>
-                        {c.contractId && <span className="text-xs font-mono" style={{ color: "rgba(255,255,255,0.25)" }}>#{c.contractId}</span>}
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <span className="text-sm font-mono font-semibold" style={{ color: "#c084fc" }}>{shortAddr(c.creator)}</span>
+                        {isOwn && <span className="text-xs px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: "rgba(242,139,12,0.15)", color: "#F28B0C" }}>vos</span>}
+                        <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: sc.bg, color: sc.text }}>{statusLabel(c.status)}</span>
+                        <span className="text-xs font-mono" style={{ color: "rgba(255,255,255,0.2)" }}>#{c.id}</span>
                       </div>
                       <p className="text-sm text-white leading-snug">{c.goal}</p>
                     </div>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <div className="font-black text-base" style={{ color: "#F28B0C" }}>{c.stake}</div>
+                    <div className="font-black text-base" style={{ color: "#F28B0C" }}>{c.total_funds_mon.toFixed(4)}</div>
                     <div className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>MON</div>
                   </div>
                 </div>
 
-                {c.status !== "cumplido" && (
+                {(c.status === "Active" || c.status === "EvidenceSubmitted") && c.deadline > 0 && (
                   <div className="mt-3 flex items-center gap-2">
                     <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ backgroundColor: "rgba(255,255,255,0.07)" }}>
-                      <div className="h-full rounded-full" style={{ width: `${Math.max(5, 100 - (c.daysLeft / 30) * 100)}%`, backgroundColor: "#7544A6" }} />
+                      <div className="h-full rounded-full" style={{ width: `${Math.max(5, 100 - (dl / 60) * 100)}%`, backgroundColor: "#7544A6" }} />
                     </div>
-                    <span className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>hasta {c.deadline}</span>
+                    <span className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>hasta {fmtDeadline(c.deadline)}</span>
                   </div>
                 )}
 
-                {c.status === "cumplido" && (
-                  <div className="mt-3 flex items-center gap-2">
-                    <svg className="w-4 h-4" fill="none" stroke="#F28B0C" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    <span className="text-xs font-medium" style={{ color: "#F28B0C" }}>Cumplido · verificado por IA</span>
-                  </div>
-                )}
+                <AiResultBadge commitmentId={c.id} status={c.status} />
 
-                {/* Actions: Fondear (otros) + Presentar evidencia (propio) */}
                 <div className="mt-3 flex gap-2 flex-wrap">
-                  {c.status !== "cumplido" && c.user !== username && (
-                    <button onClick={() => setFundTarget(c)} className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ backgroundColor: "rgba(116,68,166,0.15)", color: "#c084fc", border: "1px solid rgba(116,68,166,0.3)" }}>
+                  {/* Fondear — cualquiera puede apoyar un compromiso activo */}
+                  {(c.status === "Active" || c.status === "EvidenceSubmitted") && !isOwn && (
+                    <button onClick={() => { setFundTarget(c); setFundAmount(""); fundTx.reset(); }} className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ backgroundColor: "rgba(116,68,166,0.15)", color: "#c084fc", border: "1px solid rgba(116,68,166,0.3)" }}>
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                       Fondear con MON
                     </button>
                   )}
-                  {c.status === "en curso" && c.user === username && (
-                    <button onClick={() => setEvidenceTarget(c)} className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ backgroundColor: "rgba(242,139,12,0.1)", color: "#F28B0C", border: "1px solid rgba(242,139,12,0.3)" }}>
+                  {/* Presentar evidencia — solo el dueño y solo si está activo */}
+                  {c.status === "Active" && isOwn && (
+                    <button onClick={() => { setEvidenceTarget(c); setEvidenceForm({ type: "URL", value: "" }); evidenceTx.reset(); setValidationResult(null); }} className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ backgroundColor: "rgba(242,139,12,0.1)", color: "#F28B0C", border: "1px solid rgba(242,139,12,0.3)" }}>
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
                       Presentar evidencia
                     </button>
                   )}
+                  {/* Explorer link */}
+                  <a href={`https://monad-testnet.socialscan.io/address/${c.creator}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ color: "rgba(255,255,255,0.3)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                    Explorer ↗
+                  </a>
                 </div>
               </div>
-            ))}
-
-            {groupCommitments.length === 0 && (
-              <div className="text-center py-12" style={{ color: "rgba(255,255,255,0.3)" }}>
-                <p className="text-base font-light">Sin compromisos en este grupo.</p>
-                <p className="text-sm mt-1">Sé el primero en crear uno.</p>
-              </div>
-            )}
-          </div>
+            );
+          })}
         </div>
       )}
 
-      {/* ── Modal: Create / Join group ────────────────────────────────────────── */}
-      {modal && modal !== "commitment" && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }} onClick={(e) => e.target === e.currentTarget && setModal(null)}>
-          <div className="w-full max-w-md rounded-2xl p-6" style={{ backgroundColor: "#1a0020", border: "1px solid rgba(116,68,166,0.5)" }}>
-            {modal === "create" && (
-              <>
-                <h2 className="font-black text-xl text-white mb-1">Crear grupo</h2>
-                <p className="text-sm mb-5" style={{ color: "rgba(255,255,255,0.4)" }}>Los miembros se unen con un código único.</p>
-                <form onSubmit={handleCreateGroup} className="space-y-4">
-                  <input type="text" placeholder="Nombre del grupo" value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} className="w-full px-4 py-3 rounded-xl text-white text-sm outline-none" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} autoFocus />
-                  <div className="flex gap-3">
-                    <button type="button" onClick={() => setModal(null)} className="flex-1 py-3 rounded-xl text-sm font-semibold" style={{ backgroundColor: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.6)" }}>Cancelar</button>
-                    <button type="submit" disabled={!newGroupName.trim()} className="flex-1 py-3 rounded-xl text-sm font-black disabled:opacity-40" style={{ backgroundColor: "#F28B0C", color: "#40011E" }}>Crear →</button>
-                  </div>
-                </form>
-              </>
-            )}
-            {modal === "join" && (
-              <>
-                <h2 className="font-black text-xl text-white mb-1">Unirse a un grupo</h2>
-                <p className="text-sm mb-5" style={{ color: "rgba(255,255,255,0.4)" }}>Ingresá el código que te compartieron.</p>
-                <form onSubmit={handleJoin} className="space-y-4">
-                  <input type="text" placeholder="Código del grupo (ej: RUN24)" value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase())} className="w-full px-4 py-3 rounded-xl text-white text-sm outline-none font-mono tracking-widest uppercase" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} autoFocus />
-                  <div className="flex gap-3">
-                    <button type="button" onClick={() => { setModal(null); setJoinCode(""); }} className="flex-1 py-3 rounded-xl text-sm font-semibold" style={{ backgroundColor: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.6)" }}>Cancelar</button>
-                    <button type="submit" disabled={joinCode.length < 4} className="flex-1 py-3 rounded-xl text-sm font-black disabled:opacity-40" style={{ backgroundColor: "#7544A6", color: "white" }}>Unirme →</button>
-                  </div>
-                </form>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ── Modal: Nuevo compromiso ────────────────────────────────────────────── */}
+      {/* ── Modal: Nuevo compromiso ───────────────────────────────────────────── */}
       {modal === "commitment" && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }} onClick={(e) => e.target === e.currentTarget && closeCommitmentModal()}>
           <div className="w-full max-w-md rounded-2xl p-6 overflow-y-auto" style={{ backgroundColor: "#1a0020", border: "1px solid rgba(116,68,166,0.5)", maxHeight: "90vh" }}>
             <h2 className="font-black text-xl text-white mb-1">Nuevo compromiso</h2>
-            <p className="text-sm mb-4" style={{ color: "rgba(255,255,255,0.4)" }}>El grupo verá tu compromiso y la IA validará la evidencia.</p>
+            <p className="text-sm mb-4" style={{ color: "rgba(255,255,255,0.4)" }}>El grupo verá tu compromiso on-chain. La IA valida la evidencia.</p>
 
-            {/* Wallet status */}
             {isConnected ? (
               <div className="flex items-center gap-2 rounded-xl px-3 py-2 mb-4 text-xs" style={{ backgroundColor: "rgba(116,68,166,0.12)", border: "1px solid rgba(116,68,166,0.3)" }}>
                 <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
-                <span className="font-mono text-white">{address?.slice(0,6)}…{address?.slice(-4)}</span>
-                <span className="font-bold ml-auto" style={{ color: "#F28B0C" }}>{formattedBalance}</span>
+                <span className="font-mono text-white">{userAddress?.slice(0,6)}…{userAddress?.slice(-4)}</span>
+                {formattedBalance && <span className="font-bold ml-auto" style={{ color: "#F28B0C" }}>{formattedBalance}</span>}
               </div>
             ) : (
-              <div className="flex items-center gap-2 rounded-xl px-3 py-2 mb-4 text-xs" style={{ backgroundColor: "rgba(242,139,12,0.08)", border: "1px solid rgba(242,139,12,0.2)", color: "rgba(255,255,255,0.5)" }}>
-                <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="#F28B0C" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
-                Conectá tu wallet para fondear el stake en MON.
-              </div>
+              <div className="rounded-xl px-3 py-2 mb-4 text-xs" style={{ backgroundColor: "rgba(242,139,12,0.08)", border: "1px solid rgba(242,139,12,0.2)", color: "rgba(255,255,255,0.5)" }}>Conectá tu wallet para fondear el stake.</div>
             )}
 
-            <form onSubmit={handleAddCommitment} className="space-y-3">
+            <form onSubmit={handleCreateCommitment} className="space-y-3">
               <textarea placeholder="Describí tu objetivo (qué, cuánto, cuándo)" value={newCommitment.goal} onChange={(e) => setNewCommitment({ ...newCommitment, goal: e.target.value })} rows={3} className="w-full px-4 py-3 rounded-xl text-white text-sm outline-none resize-none" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} />
-
-              <textarea placeholder="Criterios de éxito (opcional — por defecto usa el objetivo)" value={newCommitment.criteria} onChange={(e) => setNewCommitment({ ...newCommitment, criteria: e.target.value })} rows={2} className="w-full px-4 py-3 rounded-xl text-white text-sm outline-none resize-none" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} />
-
+              <textarea placeholder="Criterios de éxito (opcional)" value={newCommitment.criteria} onChange={(e) => setNewCommitment({ ...newCommitment, criteria: e.target.value })} rows={2} className="w-full px-4 py-3 rounded-xl text-white text-sm outline-none resize-none" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} />
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>Stake (MON)</label>
                   <input type="number" placeholder="0.0005" min={0.0001} step="any" value={newCommitment.stake} onChange={(e) => setNewCommitment({ ...newCommitment, stake: e.target.value })} disabled={!isConnected} className="w-full px-3 py-2.5 rounded-xl text-white text-sm outline-none disabled:opacity-40" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} />
                 </div>
                 <div>
-                  <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>Fecha y hora límite</label>
+                  <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>Deadline</label>
                   <input type="datetime-local" value={newCommitment.deadline} onChange={(e) => setNewCommitment({ ...newCommitment, deadline: e.target.value })} className="w-full px-3 py-2.5 rounded-xl text-white text-sm outline-none" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)", colorScheme: "dark" }} />
                 </div>
                 <div>
@@ -526,32 +415,26 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
                 </div>
               </div>
 
-              {/* Tx feedback */}
               {createTx.status === "success" && createTx.hash && (
                 <div className="rounded-xl px-3 py-2 text-xs" style={{ backgroundColor: "rgba(242,139,12,0.1)", border: "1px solid rgba(242,139,12,0.3)" }}>
                   ✓ On-chain · <TxHashLink hash={createTx.hash} />
+                  {pendingCommitmentId !== null && <span className="ml-2" style={{ color: "rgba(255,255,255,0.4)" }}>ID #{pendingCommitmentId} · aparece en ~10s</span>}
                 </div>
               )}
               {createTx.status === "error" && (
-                <div className="rounded-xl px-3 py-2 text-xs" style={{ backgroundColor: "rgba(255,60,60,0.08)", border: "1px solid rgba(255,60,60,0.2)", color: "#ff9090" }}>
-                  {createTx.error ?? "Error al enviar la transacción"}
-                </div>
+                <div className="rounded-xl px-3 py-2 text-xs" style={{ backgroundColor: "rgba(255,60,60,0.08)", border: "1px solid rgba(255,60,60,0.2)", color: "#ff9090" }}>{createTx.error ?? "Error al enviar la transacción"}</div>
               )}
 
               <div className="flex gap-3 pt-1">
                 <button type="button" onClick={closeCommitmentModal} disabled={createTx.status === "signing" || createTx.status === "confirming"} className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40" style={{ backgroundColor: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.6)" }}>
                   {createTx.status === "success" ? "Cerrar" : "Cancelar"}
                 </button>
-                <button type="submit" disabled={!newCommitment.goal.trim() || createTx.status === "signing" || createTx.status === "confirming" || createTx.status === "success"} className="flex-1 py-3 rounded-xl text-sm font-black disabled:opacity-40 flex items-center justify-center gap-2" style={{ backgroundColor: "#F28B0C", color: "#40011E" }}>
-                  {createTx.status === "signing"    && <><Spinner /> Esperando firma…</>}
+                <button type="submit" disabled={!newCommitment.goal.trim() || !newCommitment.stake || !isConnected || !newCommitment.deadline || createTx.status === "signing" || createTx.status === "confirming" || createTx.status === "success"} className="flex-1 py-3 rounded-xl text-sm font-black disabled:opacity-40 flex items-center justify-center gap-2" style={{ backgroundColor: "#F28B0C", color: "#40011E" }}>
+                  {createTx.status === "signing"    && <><Spinner /> Firmando…</>}
                   {createTx.status === "confirming" && <><Spinner /> Confirmando…</>}
                   {createTx.status === "success"    && "✓ Creado on-chain"}
                   {createTx.status === "error"      && "Reintentar"}
-                  {createTx.status === "idle"       && (
-                    isConnected && newCommitment.stake
-                      ? `Crear + Stake ${newCommitment.stake} MON →`
-                      : "Crear compromiso →"
-                  )}
+                  {createTx.status === "idle"       && (isConnected && newCommitment.stake ? `Crear + Stake ${newCommitment.stake} MON →` : "Crear compromiso →")}
                 </button>
               </div>
             </form>
@@ -564,16 +447,14 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }} onClick={(e) => e.target === e.currentTarget && closeFundModal()}>
           <div className="w-full max-w-sm rounded-2xl p-6" style={{ backgroundColor: "#1a0020", border: "1px solid rgba(116,68,166,0.5)" }}>
             <h2 className="font-black text-xl text-white mb-1">Fondear compromiso</h2>
-            <p className="text-sm mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>{fundTarget.user} · {fundTarget.goal.slice(0, 55)}…</p>
-            {fundTarget.contractId === undefined && (
-              <p className="text-xs mb-3" style={{ color: "rgba(255,255,255,0.3)" }}>Este compromiso aún no está on-chain — el aporte se registrará cuando los contratos estén deployados.</p>
-            )}
+            <p className="text-sm mb-1" style={{ color: "rgba(255,255,255,0.4)" }}>{shortAddr(fundTarget.creator)} · {fundTarget.goal.slice(0, 55)}…</p>
+            <p className="text-xs mb-4" style={{ color: "rgba(255,255,255,0.3)" }}>Si cumple, tu MON se devuelve. Si falla, va al pool del ecosistema.</p>
 
             {isConnected ? (
               <div className="flex items-center gap-2 rounded-xl px-3 py-2 mb-4 text-xs" style={{ backgroundColor: "rgba(116,68,166,0.12)", border: "1px solid rgba(116,68,166,0.3)" }}>
                 <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
-                <span className="font-mono text-white">{address?.slice(0,6)}…{address?.slice(-4)}</span>
-                <span className="font-bold ml-auto" style={{ color: "#F28B0C" }}>{formattedBalance}</span>
+                <span className="font-mono text-white">{userAddress?.slice(0,6)}…{userAddress?.slice(-4)}</span>
+                {formattedBalance && <span className="font-bold ml-auto" style={{ color: "#F28B0C" }}>{formattedBalance}</span>}
               </div>
             ) : (
               <div className="rounded-xl px-3 py-2 mb-4 text-xs" style={{ backgroundColor: "rgba(242,139,12,0.08)", border: "1px solid rgba(242,139,12,0.2)", color: "rgba(255,255,255,0.5)" }}>Conectá tu wallet para fondear.</div>
@@ -584,20 +465,14 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
                 <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>Monto (MON)</label>
                 <input type="number" placeholder="0.0005" min={0.0001} step="any" value={fundAmount} onChange={(e) => setFundAmount(e.target.value)} disabled={!isConnected} className="w-full px-4 py-2.5 rounded-xl text-white text-sm outline-none disabled:opacity-40" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} autoFocus />
               </div>
-
               {fundTx.status === "success" && fundTx.hash && (
-                <div className="rounded-xl px-3 py-2 text-xs" style={{ backgroundColor: "rgba(242,139,12,0.1)", border: "1px solid rgba(242,139,12,0.3)" }}>
-                  ✓ Fondeo confirmado · <TxHashLink hash={fundTx.hash} />
-                </div>
+                <div className="rounded-xl px-3 py-2 text-xs" style={{ backgroundColor: "rgba(242,139,12,0.1)", border: "1px solid rgba(242,139,12,0.3)" }}>✓ Fondeo on-chain · <TxHashLink hash={fundTx.hash} /></div>
               )}
               {fundTx.status === "error" && (
                 <div className="rounded-xl px-3 py-2 text-xs" style={{ backgroundColor: "rgba(255,60,60,0.08)", border: "1px solid rgba(255,60,60,0.2)", color: "#ff9090" }}>{fundTx.error ?? "Error"}</div>
               )}
-
               <div className="flex gap-3">
-                <button type="button" onClick={closeFundModal} className="flex-1 py-3 rounded-xl text-sm font-semibold" style={{ backgroundColor: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.6)" }}>
-                  {fundTx.status === "success" ? "Cerrar" : "Cancelar"}
-                </button>
+                <button type="button" onClick={closeFundModal} className="flex-1 py-3 rounded-xl text-sm font-semibold" style={{ backgroundColor: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.6)" }}>{fundTx.status === "success" ? "Cerrar" : "Cancelar"}</button>
                 <button type="submit" disabled={!isConnected || !fundAmount || fundTx.status === "signing" || fundTx.status === "confirming" || fundTx.status === "success"} className="flex-1 py-3 rounded-xl text-sm font-black disabled:opacity-40 flex items-center justify-center gap-2" style={{ backgroundColor: "#7544A6", color: "white" }}>
                   {fundTx.status === "signing"    && <><Spinner /> Firmando…</>}
                   {fundTx.status === "confirming" && <><Spinner /> Confirmando…</>}
@@ -618,18 +493,13 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
             <p className="text-sm mb-4" style={{ color: "rgba(255,255,255,0.4)" }}>{evidenceTarget.goal.slice(0, 70)}…</p>
 
             {validationResult ? (
-              /* Resultado de validación */
               <div className="space-y-4">
                 <div className="rounded-2xl p-5 text-center" style={{ backgroundColor: validationResult.fulfilled ? "rgba(242,139,12,0.1)" : "rgba(255,60,60,0.08)", border: `1px solid ${validationResult.fulfilled ? "rgba(242,139,12,0.3)" : "rgba(255,60,60,0.2)"}` }}>
                   <p className="font-black text-2xl mb-1" style={{ color: validationResult.fulfilled ? "#F28B0C" : "#ff7070" }}>
                     {validationResult.fulfilled ? "✓ Cumplido" : "✗ No cumplido"}
                   </p>
-                  <p className="text-sm font-semibold" style={{ color: "rgba(255,255,255,0.5)" }}>
-                    Confianza: {Math.round(validationResult.confidence * 100)}%
-                  </p>
-                  <p className="text-xs mt-3 leading-relaxed text-left" style={{ color: "rgba(255,255,255,0.6)" }}>
-                    {validationResult.reasoning}
-                  </p>
+                  <p className="text-sm font-semibold" style={{ color: "rgba(255,255,255,0.5)" }}>Confianza: {Math.round(validationResult.confidence * 100)}%</p>
+                  <p className="text-xs mt-3 leading-relaxed text-left" style={{ color: "rgba(255,255,255,0.6)" }}>{validationResult.reasoning}</p>
                 </div>
                 {evidenceTx.hash && (
                   <div className="rounded-xl px-3 py-2 text-xs" style={{ backgroundColor: "rgba(116,68,166,0.1)", border: "1px solid rgba(116,68,166,0.3)" }}>
@@ -640,30 +510,19 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
               </div>
             ) : (
               <form onSubmit={handleSubmitEvidence} className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>Tipo de evidencia</label>
-                    <select value={evidenceForm.type} onChange={(e) => setEvidenceForm({ ...evidenceForm, type: e.target.value as EvidenceType })} className="w-full px-3 py-2.5 rounded-xl text-white text-sm outline-none" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)", colorScheme: "dark" }}>
-                      {EVIDENCE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </div>
+                <div>
+                  <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>Tipo de evidencia</label>
+                  <select value={evidenceForm.type} onChange={(e) => setEvidenceForm({ ...evidenceForm, type: e.target.value as EvidenceType })} className="w-full px-3 py-2.5 rounded-xl text-white text-sm outline-none" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)", colorScheme: "dark" }}>
+                    {EVIDENCE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
                 </div>
-
                 <div>
                   <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>
                     {evidenceForm.type === "URL" || evidenceForm.type === "GITHUB" ? "URL de la evidencia" : "Descripción de la evidencia"}
                   </label>
-                  <textarea
-                    placeholder={evidenceForm.type === "URL" ? "https://..." : evidenceForm.type === "GITHUB" ? "https://github.com/..." : "Describí en detalle cómo cumpliste el objetivo..."}
-                    value={evidenceForm.value}
-                    onChange={(e) => setEvidenceForm({ ...evidenceForm, value: e.target.value })}
-                    rows={4}
-                    className="w-full px-4 py-3 rounded-xl text-white text-sm outline-none resize-none"
-                    style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }}
-                  />
+                  <textarea placeholder={evidenceForm.type === "GITHUB" ? "https://github.com/…" : evidenceForm.type === "URL" ? "https://…" : "Describí en detalle cómo cumpliste el objetivo…"} value={evidenceForm.value} onChange={(e) => setEvidenceForm({ ...evidenceForm, value: e.target.value })} rows={4} className="w-full px-4 py-3 rounded-xl text-white text-sm outline-none resize-none" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} />
                 </div>
 
-                {/* On-chain step status */}
                 {(evidenceTx.status === "signing" || evidenceTx.status === "confirming" || evidenceTx.status === "success") && (
                   <div className="rounded-xl px-3 py-2 text-xs flex items-center gap-2" style={{ backgroundColor: "rgba(116,68,166,0.1)", border: "1px solid rgba(116,68,166,0.3)", color: "#c084fc" }}>
                     {evidenceTx.status !== "success" && <Spinner />}
@@ -675,8 +534,6 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
                 {evidenceTx.status === "error" && (
                   <div className="rounded-xl px-3 py-2 text-xs" style={{ backgroundColor: "rgba(255,60,60,0.08)", border: "1px solid rgba(255,60,60,0.2)", color: "#ff9090" }}>{evidenceTx.error ?? "Error on-chain"}</div>
                 )}
-
-                {/* Backend step status */}
                 {validating && (
                   <div className="rounded-xl px-3 py-2 text-xs flex items-center gap-2" style={{ backgroundColor: "rgba(242,139,12,0.08)", border: "1px solid rgba(242,139,12,0.2)", color: "rgba(255,255,255,0.5)" }}>
                     <Spinner /> Validando con IA…
@@ -694,6 +551,233 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Main component ─────────────────────────────────────────────────────────────
+
+export default function PrivateGroupsTab({ username }: { username: string }) {
+  const { groups, addGroup, removeGroup } = useGroups();
+  const [selectedGroup, setSelectedGroup] = useState<LocalGroup | null>(null);
+  const [modal, setModal] = useState<"create" | "join" | null>(null);
+  const [newGroupName, setNewGroupName] = useState("");
+  const [joinCode, setJoinCode] = useState("");
+  const [joinError, setJoinError] = useState("");
+
+  const { address, isConnected } = useConnection();
+  const { data: balance } = useBalance({ address, chainId: monadTestnet.id, query: { enabled: isConnected } });
+  const formattedBalance = balance ? `${Number(formatUnits(balance.value, balance.decimals)).toFixed(2)} MON` : null;
+
+  const contractsDeployed = !!(
+    CONTRACTS.groupMultisig &&
+    CONTRACTS.groupMultisig !== "0x0000000000000000000000000000000000000000"
+  );
+
+  const createGroupTx = useTx();
+  const [pendingGroupId, setPendingGroupId] = useState<number | null>(null);
+  const [pendingGroupName, setPendingGroupName] = useState("");
+  const [pendingEmoji, setPendingEmoji] = useState("");
+
+  async function fetchNextGroupId(): Promise<number> {
+    const res = await fetch(`${BACKEND_URL}/groups/next-id`);
+    const data = await res.json();
+    return data.next_group_id as number;
+  }
+
+  async function handleCreateGroup(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newGroupName.trim() || !isConnected) return;
+    if (!contractsDeployed) {
+      alert("Contratos no deployados. Revisá las variables de entorno.");
+      return;
+    }
+    const emoji = EMOJIS[Math.floor(Math.random() * EMOJIS.length)];
+    setPendingEmoji(emoji);
+    setPendingGroupName(newGroupName.trim());
+    try {
+      const nextId = await fetchNextGroupId();
+      setPendingGroupId(nextId);
+      await createGroupTx.writeContractAsync({
+        address: CONTRACTS.groupMultisig,
+        abi: GROUP_MULTISIG_ABI,
+        functionName: "createGroup",
+        args: [[address!], BigInt(1), newGroupName.trim()],
+        chainId: monadTestnet.id,
+      });
+    } catch { /* error en createGroupTx.error */ }
+  }
+
+  // After group created → save to localStorage and navigate in
+  if (createGroupTx.status === "success" && pendingGroupId !== null && pendingGroupName) {
+    const newGroup: LocalGroup = { id: pendingGroupId, name: pendingGroupName, emoji: pendingEmoji };
+    addGroup(newGroup);
+    // Reset and navigate
+    setTimeout(() => {
+      setModal(null);
+      setNewGroupName("");
+      setPendingGroupId(null);
+      setPendingGroupName("");
+      createGroupTx.reset();
+      setSelectedGroup(newGroup);
+    }, 1500);
+  }
+
+  async function handleJoin(e: React.FormEvent) {
+    e.preventDefault();
+    setJoinError("");
+    const id = parseInt(joinCode.trim(), 10);
+    if (isNaN(id)) { setJoinError("Ingresá un ID numérico válido."); return; }
+    if (groups.some((g) => g.id === id)) { setJoinError("Ya estás en ese grupo."); return; }
+    try {
+      const res = await fetch(`${BACKEND_URL}/groups/${id}`);
+      if (!res.ok) { setJoinError("Grupo no encontrado on-chain."); return; }
+      const data = await res.json();
+      const newGroup: LocalGroup = { id, name: data.name || `Grupo #${id}`, emoji: EMOJIS[id % EMOJIS.length] };
+      addGroup(newGroup);
+      setModal(null);
+      setJoinCode("");
+      setSelectedGroup(newGroup);
+    } catch {
+      setJoinError("Error al conectar con el backend.");
+    }
+  }
+
+  if (selectedGroup) {
+    return (
+      <GroupDetail
+        localGroup={selectedGroup}
+        userAddress={address}
+        username={username}
+        isConnected={isConnected}
+        contractsDeployed={contractsDeployed}
+        formattedBalance={formattedBalance}
+        onBack={() => setSelectedGroup(null)}
+      />
+    );
+  }
+
+  return (
+    <>
+      {/* List view */}
+      <div className="flex gap-3 mb-6">
+        <button onClick={() => { setModal("create"); createGroupTx.reset(); setPendingGroupId(null); }} disabled={!isConnected} className="flex items-center gap-2 text-sm font-bold px-4 py-2.5 rounded-xl disabled:opacity-40" style={{ backgroundColor: "#F28B0C", color: "#40011E" }}>
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+          Crear grupo
+        </button>
+        <button onClick={() => { setModal("join"); setJoinCode(""); setJoinError(""); }} className="flex items-center gap-2 text-sm font-semibold px-4 py-2.5 rounded-xl border" style={{ borderColor: "rgba(116,68,166,0.5)", color: "#c084fc" }}>
+          Unirse con ID →
+        </button>
+        {!isConnected && <p className="self-center text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>Conectá tu wallet para crear grupos.</p>}
+      </div>
+
+      {groups.length === 0 ? (
+        <div className="text-center py-16" style={{ color: "rgba(255,255,255,0.3)" }}>
+          <p className="text-lg font-light">Sin grupos aún.</p>
+          <p className="text-sm mt-1">Creá uno o unite con el ID de un grupo existente.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {groups.map((group) => (
+            <GroupCard key={group.id} group={group} onOpen={() => setSelectedGroup(group)} onLeave={() => removeGroup(group.id)} />
+          ))}
+        </div>
+      )}
+
+      {/* ── Modal: Crear grupo ────────────────────────────────────────────────── */}
+      {modal === "create" && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }} onClick={(e) => e.target === e.currentTarget && setModal(null)}>
+          <div className="w-full max-w-md rounded-2xl p-6" style={{ backgroundColor: "#1a0020", border: "1px solid rgba(116,68,166,0.5)" }}>
+            <h2 className="font-black text-xl text-white mb-1">Crear grupo</h2>
+            <p className="text-sm mb-5" style={{ color: "rgba(255,255,255,0.4)" }}>El grupo se crea on-chain en el GroupMultisig. Compartí el ID para que otros se unan.</p>
+            <form onSubmit={handleCreateGroup} className="space-y-4">
+              <input type="text" placeholder="Nombre del grupo" value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} className="w-full px-4 py-3 rounded-xl text-white text-sm outline-none" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} autoFocus />
+
+              {createGroupTx.status === "success" && createGroupTx.hash && (
+                <div className="rounded-xl px-3 py-2 text-xs" style={{ backgroundColor: "rgba(242,139,12,0.1)", border: "1px solid rgba(242,139,12,0.3)" }}>
+                  ✓ Grupo #{pendingGroupId} creado · <TxHashLink hash={createGroupTx.hash} />
+                </div>
+              )}
+              {createGroupTx.status === "error" && (
+                <div className="rounded-xl px-3 py-2 text-xs" style={{ backgroundColor: "rgba(255,60,60,0.08)", border: "1px solid rgba(255,60,60,0.2)", color: "#ff9090" }}>{createGroupTx.error ?? "Error"}</div>
+              )}
+
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setModal(null)} disabled={createGroupTx.status === "signing" || createGroupTx.status === "confirming"} className="flex-1 py-3 rounded-xl text-sm font-semibold disabled:opacity-40" style={{ backgroundColor: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.6)" }}>Cancelar</button>
+                <button type="submit" disabled={!newGroupName.trim() || createGroupTx.status === "signing" || createGroupTx.status === "confirming" || createGroupTx.status === "success"} className="flex-1 py-3 rounded-xl text-sm font-black disabled:opacity-40 flex items-center justify-center gap-2" style={{ backgroundColor: "#F28B0C", color: "#40011E" }}>
+                  {createGroupTx.status === "signing"    && <><Spinner /> Firmando…</>}
+                  {createGroupTx.status === "confirming" && <><Spinner /> Confirmando…</>}
+                  {createGroupTx.status === "success"    && "✓ Creado"}
+                  {(createGroupTx.status === "idle" || createGroupTx.status === "error") && "Crear on-chain →"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Unirse ─────────────────────────────────────────────────────── */}
+      {modal === "join" && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }} onClick={(e) => e.target === e.currentTarget && setModal(null)}>
+          <div className="w-full max-w-md rounded-2xl p-6" style={{ backgroundColor: "#1a0020", border: "1px solid rgba(116,68,166,0.5)" }}>
+            <h2 className="font-black text-xl text-white mb-1">Unirse a un grupo</h2>
+            <p className="text-sm mb-5" style={{ color: "rgba(255,255,255,0.4)" }}>Ingresá el ID numérico del grupo (lo ves cuando alguien te comparte su grupo).</p>
+            <form onSubmit={handleJoin} className="space-y-4">
+              <input type="number" placeholder="ID del grupo (ej: 1)" value={joinCode} onChange={(e) => { setJoinCode(e.target.value); setJoinError(""); }} className="w-full px-4 py-3 rounded-xl text-white text-sm outline-none font-mono" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} autoFocus />
+              {joinError && <p className="text-xs" style={{ color: "#ff9090" }}>{joinError}</p>}
+              <div className="flex gap-3">
+                <button type="button" onClick={() => { setModal(null); setJoinCode(""); setJoinError(""); }} className="flex-1 py-3 rounded-xl text-sm font-semibold" style={{ backgroundColor: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.6)" }}>Cancelar</button>
+                <button type="submit" disabled={!joinCode} className="flex-1 py-3 rounded-xl text-sm font-black disabled:opacity-40" style={{ backgroundColor: "#7544A6", color: "white" }}>Unirme →</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </>
+  );
+}
+
+// ── Group card (list item) ─────────────────────────────────────────────────────
+
+function GroupCard({ group, onOpen, onLeave }: { group: LocalGroup; onOpen: () => void; onLeave: () => void }) {
+  const { data } = useGroupData(group.id);
+  const { data: commitmentsData } = useGroupCommitments(group.id);
+  const commitments = commitmentsData?.commitments ?? [];
+  const active = commitments.filter((c) => c.status === "Active" || c.status === "EvidenceSubmitted").length;
+  const fulfilled = commitments.filter((c) => c.status === "Fulfilled").length;
+  const rate = commitments.length > 0 ? Math.round((fulfilled / commitments.length) * 100) : 0;
+
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: "rgba(88,2,89,0.2)", border: "1px solid rgba(116,68,166,0.3)" }}>
+      <button onClick={onOpen} className="w-full text-left p-5 transition-all hover:scale-[1.005] block">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl" style={{ backgroundColor: "rgba(116,68,166,0.2)" }}>{group.emoji}</div>
+            <div>
+              <p className="font-bold text-base text-white">{group.name}</p>
+              <p className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.45)" }}>
+                ID #{group.id} · {data ? `${data.members.length} miembros` : "…"} · {active} activos
+              </p>
+            </div>
+          </div>
+          <div className="text-right ml-4">
+            <div className="text-lg font-black" style={{ color: "#F28B0C" }}>{commitments.length > 0 ? `${rate}%` : "—"}</div>
+            <div className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>cumplimiento</div>
+          </div>
+        </div>
+        {commitments.length > 0 && (
+          <div className="mt-3 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: "rgba(255,255,255,0.08)" }}>
+            <div className="h-full rounded-full" style={{ width: `${rate}%`, backgroundColor: "#F28B0C" }} />
+          </div>
+        )}
+      </button>
+      <div className="px-5 pb-3 flex items-center justify-between">
+        <span className="flex items-center gap-1.5 text-xs" style={{ color: "rgba(255,255,255,0.25)" }}>
+          <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
+          Monad Testnet
+        </span>
+        <button onClick={(e) => { e.stopPropagation(); onLeave(); }} className="text-xs" style={{ color: "rgba(255,255,255,0.2)" }}>Salir</button>
+      </div>
+    </div>
   );
 }
