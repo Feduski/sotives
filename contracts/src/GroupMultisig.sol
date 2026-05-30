@@ -47,7 +47,7 @@ contract GroupMultisig {
         uint256 _requiredSignatures,
         string calldata _name
     ) external returns (uint256) {
-        require(_members.length >= 2, "Minimo 2 miembros");
+        require(_members.length >= 1, "Minimo 1 miembro");
         require(_requiredSignatures >= 1 && _requiredSignatures <= _members.length, "Firmas requeridas invalidas");
 
         uint256 groupId = nextGroupId++;

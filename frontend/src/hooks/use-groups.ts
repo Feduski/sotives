@@ -29,6 +29,7 @@ export type GroupCommitment = {
   criteria: string;
   evidence_type: string;
   group_id: number;
+  join_price_mon: number;
 };
 
 // ── localStorage helpers ───────────────────────────────────────────────────────

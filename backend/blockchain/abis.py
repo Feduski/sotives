@@ -5,13 +5,14 @@ COMMITMENT_MANAGER_ABI = [
     {
         "name": "createCommitment",
         "type": "function",
-        "stateMutability": "payable",
+        "stateMutability": "nonpayable",
         "inputs": [
             {"name": "_goal", "type": "string"},
             {"name": "_deadline", "type": "uint256"},
             {"name": "_criteria", "type": "string"},
             {"name": "_evidenceType", "type": "string"},
             {"name": "_groupId", "type": "uint256"},
+            {"name": "_joinPrice", "type": "uint256"},
         ],
         "outputs": [{"name": "", "type": "uint256"}],
     },
@@ -133,7 +134,7 @@ COMMITMENT_MANAGER_ABI = [
             {"name": "id", "type": "uint256", "indexed": True},
             {"name": "creator", "type": "address", "indexed": True},
             {"name": "deadline", "type": "uint256", "indexed": False},
-            {"name": "stake", "type": "uint256", "indexed": False},
+            {"name": "joinPrice", "type": "uint256", "indexed": False},
         ],
     },
     {

@@ -25,16 +25,15 @@ contract CommitmentManager {
         string evidenceType;
         bytes32 evidenceHash;
         uint256 groupId;
+        uint256 joinPrice;   // precio mínimo para unirse (en wei); 0 = gratis
     }
 
-    // reputation score per address
     mapping(address => uint256) public reputation;
-
     mapping(uint256 => CommitmentData) public commitments;
     mapping(uint256 => mapping(address => uint256)) public contributions;
     mapping(address => uint256[]) private userCommitmentIds;
 
-    event CommitmentCreated(uint256 indexed id, address indexed creator, uint256 deadline, uint256 stake);
+    event CommitmentCreated(uint256 indexed id, address indexed creator, uint256 deadline, uint256 joinPrice);
     event CommitmentSupported(uint256 indexed id, address indexed supporter, uint256 amount);
     event EvidenceSubmitted(uint256 indexed id, bytes32 evidenceHash);
     event CommitmentFulfilled(uint256 indexed id, address indexed creator, uint256 amount);
@@ -57,43 +56,46 @@ contract CommitmentManager {
         _;
     }
 
+    // Crear un compromiso es GRATUITO. El creador define joinPrice para que otros se unan.
     function createCommitment(
         string calldata _goal,
         uint256 _deadline,
         string calldata _criteria,
         string calldata _evidenceType,
-        uint256 _groupId
-    ) external payable returns (uint256) {
+        uint256 _groupId,
+        uint256 _joinPrice
+    ) external returns (uint256) {
         require(_deadline > block.timestamp, "Deadline invalido");
-        require(msg.value > 0, "Stake requerido");
 
         uint256 id = nextCommitmentId++;
 
         commitments[id] = CommitmentData({
             creator: msg.sender,
             deadline: _deadline,
-            totalFunds: msg.value,
+            totalFunds: 0,
             status: Status.Active,
             goal: _goal,
             criteria: _criteria,
             evidenceType: _evidenceType,
             evidenceHash: bytes32(0),
-            groupId: _groupId
+            groupId: _groupId,
+            joinPrice: _joinPrice
         });
 
-        contributions[id][msg.sender] = msg.value;
         userCommitmentIds[msg.sender].push(id);
 
-        emit CommitmentCreated(id, msg.sender, _deadline, msg.value);
+        emit CommitmentCreated(id, msg.sender, _deadline, _joinPrice);
         return id;
     }
 
+    // Unirse a un compromiso pagando el joinPrice (o más). 0 joinPrice = gratis.
     function supportCommitment(uint256 _id) external payable {
         CommitmentData storage c = commitments[_id];
         require(c.creator != address(0), "Compromiso no existe");
         require(c.status == Status.Active, "Compromiso no activo");
         require(block.timestamp < c.deadline, "Plazo vencido");
-        require(msg.value > 0, "Monto debe ser mayor a 0");
+        require(msg.value >= c.joinPrice, "Monto menor al joinPrice");
+        require(msg.value > 0 || c.joinPrice == 0, "Enviar MON para unirse");
 
         contributions[_id][msg.sender] += msg.value;
         c.totalFunds += msg.value;
@@ -113,6 +115,7 @@ contract CommitmentManager {
         emit EvidenceSubmitted(_id, _evidenceHash);
     }
 
+    // El agente IA resuelve el compromiso. Si cumplido, el creador recibe todos los fondos.
     function resolveCommitment(uint256 _id, bool _fulfilled) external onlyAgent {
         CommitmentData storage c = commitments[_id];
         require(c.status == Status.EvidenceSubmitted, "Evidencia no enviada");
@@ -137,7 +140,6 @@ contract CommitmentManager {
         }
     }
 
-    // Marca como fallido si venció el plazo sin evidencia
     function markExpired(uint256 _id) external onlyAgent {
         CommitmentData storage c = commitments[_id];
         require(c.status == Status.Active, "Compromiso no activo");

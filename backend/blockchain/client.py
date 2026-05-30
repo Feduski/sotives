@@ -69,6 +69,8 @@ class MonadClient:
             "evidence_type": c[6],
             "evidence_hash": c[7].hex(),
             "group_id": c[8],
+            "join_price_wei": c[9],
+            "join_price_mon": float(self.w3.from_wei(c[9], "ether")),
         }
 
     async def get_user_commitments(self, address: str) -> list[dict]:

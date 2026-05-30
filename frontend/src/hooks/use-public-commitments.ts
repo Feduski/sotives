@@ -13,6 +13,7 @@ export type PublicCommitment = {
   criteria: string;
   evidence_type: string;
   group_id: number;
+  join_price_mon: number;
 };
 
 type Response = {

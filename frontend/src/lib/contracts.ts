@@ -8,13 +8,14 @@ export const COMMITMENT_MANAGER_ABI = [
   {
     name: "createCommitment",
     type: "function",
-    stateMutability: "payable",
+    stateMutability: "nonpayable",
     inputs: [
       { name: "_goal", type: "string" },
       { name: "_deadline", type: "uint256" },
       { name: "_criteria", type: "string" },
       { name: "_evidenceType", type: "string" },
       { name: "_groupId", type: "uint256" },
+      { name: "_joinPrice", type: "uint256" },
     ],
     outputs: [{ name: "", type: "uint256" }],
   },
@@ -54,6 +55,7 @@ export const COMMITMENT_MANAGER_ABI = [
           { name: "evidenceType", type: "string" },
           { name: "evidenceHash", type: "bytes32" },
           { name: "groupId", type: "uint256" },
+          { name: "joinPrice", type: "uint256" },
         ],
       },
     ],
