@@ -115,19 +115,45 @@ class ERC8004Client:
             logger.warning(f"ERC8004: no se pudo verificar registro: {e}")
             return False
 
+    async def _fetch_agent_id(self) -> int | None:
+        """Lee el tokenId del último evento Transfer al address del agente."""
+        try:
+            latest = await self.w3.eth.block_number
+            from_block = max(0, latest - 10000)
+            logs = await self.w3.eth.get_logs({
+                "address": self.w3.to_checksum_address(IDENTITY_REGISTRY_ADDRESS),
+                "fromBlock": from_block,
+                "toBlock": "latest",
+                "topics": [
+                    self.w3.keccak(text="Transfer(address,address,uint256)").hex(),
+                    None,
+                    "0x" + self.account.address[2:].zfill(64),
+                ],
+            })
+            if logs:
+                token_id = int(logs[-1]["topics"][3].hex(), 16)
+                logger.info(f"ERC8004: agent_id encontrado — {token_id}")
+                return token_id
+        except Exception as e:
+            logger.warning(f"ERC8004: no se pudo obtener agent_id: {e}")
+        return None
+
     async def register_agent(self) -> str | None:
         """
         Registra el agente en el Identity Registry si aún no está registrado.
+        Siempre intenta cargar el agent_id al finalizar.
         Retorna el tx hash o None si ya estaba registrado.
         """
         if await self.is_registered():
             logger.info("ERC8004: agente ya registrado en Identity Registry")
+            self.agent_id = await self._fetch_agent_id()
             return None
 
         try:
             fn = self.identity_registry.functions.register(AGENT_METADATA_URI)
             tx_hash = await self._send_tx(fn)
             logger.info(f"ERC8004: agente registrado — tx: {tx_hash}")
+            self.agent_id = await self._fetch_agent_id()
             return tx_hash
         except Exception as e:
             logger.error(f"ERC8004: error al registrar agente: {e}")
