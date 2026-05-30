@@ -586,8 +586,9 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
         address: CONTRACTS.groupMultisig,
         abi: GROUP_MULTISIG_ABI,
         functionName: "createGroup",
-        // ✅ Solo el creador como miembro — GroupMultisig acepta >= 1
-        args: [[address!], BigInt(1), newGroupName.trim()],
+        // Contrato deployado exige >= 2 miembros; se pasa el address dos veces
+        // como workaround hasta que se redespliege con el fix de >= 1 miembro.
+        args: [[address!, address!], BigInt(1), newGroupName.trim()],
         chainId: monadTestnet.id,
       });
     } catch {
