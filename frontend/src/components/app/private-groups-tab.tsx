@@ -47,6 +47,12 @@ const MOCK_COMMITMENTS: Commitment[] = [
   { id: "c6", groupId: "2", user: "@fede",   goal: "Completar backend MVP con auth y smart contracts",    stake: 400, deadline: "30 jun", status: "en curso", daysLeft: 28 },
 ];
 
+function fmtDeadline(dt: string): string {
+  if (!dt) return "—";
+  const d = new Date(dt);
+  return d.toLocaleString("es-AR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
 // ── Tx status helper ───────────────────────────────────────────────────────────
 
 type TxStatus = "idle" | "signing" | "confirming" | "success" | "error";
@@ -99,7 +105,7 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
   const [joinCode, setJoinCode] = useState("");
   const [newGroupName, setNewGroupName] = useState("");
   const [newCommitment, setNewCommitment] = useState({
-    goal: "", stake: "", deadline: "", criteria: "", evidenceType: "URL" as EvidenceType,
+    goal: "", stake: "0.0005", deadline: "", criteria: "", evidenceType: "URL" as EvidenceType,
   });
   const [groups, setGroups] = useState<Group[]>(MOCK_GROUPS);
   const [commitments, setCommitments] = useState<Commitment[]>(MOCK_COMMITMENTS);
@@ -131,7 +137,7 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
 
   function closeCommitmentModal() {
     setModal(null);
-    setNewCommitment({ goal: "", stake: "", deadline: "", criteria: "", evidenceType: "URL" });
+    setNewCommitment({ goal: "", stake: "0.0005", deadline: "", criteria: "", evidenceType: "URL" });
     createTx.reset();
   }
 
@@ -202,7 +208,7 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
           user: username,
           goal: newCommitment.goal.trim(),
           stake: stakeAmount,
-          deadline: newCommitment.deadline || "—",
+          deadline: fmtDeadline(newCommitment.deadline),
           status: "en curso",
           daysLeft: 30,
         }]);
@@ -506,11 +512,11 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>Stake (MON)</label>
-                  <input type="number" placeholder="50" min={0} value={newCommitment.stake} onChange={(e) => setNewCommitment({ ...newCommitment, stake: e.target.value })} disabled={!isConnected} className="w-full px-3 py-2.5 rounded-xl text-white text-sm outline-none disabled:opacity-40" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} />
+                  <input type="number" placeholder="0.0005" min={0.0001} step="any" value={newCommitment.stake} onChange={(e) => setNewCommitment({ ...newCommitment, stake: e.target.value })} disabled={!isConnected} className="w-full px-3 py-2.5 rounded-xl text-white text-sm outline-none disabled:opacity-40" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} />
                 </div>
                 <div>
-                  <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>Fecha límite</label>
-                  <input type="date" value={newCommitment.deadline} onChange={(e) => setNewCommitment({ ...newCommitment, deadline: e.target.value })} className="w-full px-3 py-2.5 rounded-xl text-white text-sm outline-none" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)", colorScheme: "dark" }} />
+                  <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>Fecha y hora límite</label>
+                  <input type="datetime-local" value={newCommitment.deadline} onChange={(e) => setNewCommitment({ ...newCommitment, deadline: e.target.value })} className="w-full px-3 py-2.5 rounded-xl text-white text-sm outline-none" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)", colorScheme: "dark" }} />
                 </div>
                 <div>
                   <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>Evidencia</label>
@@ -576,7 +582,7 @@ export default function PrivateGroupsTab({ username }: { username: string }) {
             <form onSubmit={handleFund} className="space-y-4">
               <div>
                 <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>Monto (MON)</label>
-                <input type="number" placeholder="10" min={1} value={fundAmount} onChange={(e) => setFundAmount(e.target.value)} disabled={!isConnected} className="w-full px-4 py-2.5 rounded-xl text-white text-sm outline-none disabled:opacity-40" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} autoFocus />
+                <input type="number" placeholder="0.0005" min={0.0001} step="any" value={fundAmount} onChange={(e) => setFundAmount(e.target.value)} disabled={!isConnected} className="w-full px-4 py-2.5 rounded-xl text-white text-sm outline-none disabled:opacity-40" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} autoFocus />
               </div>
 
               {fundTx.status === "success" && fundTx.hash && (

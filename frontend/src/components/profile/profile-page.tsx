@@ -159,18 +159,6 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* Error de backend (wallet conectada pero backend no responde) */}
-        {isConnected && profileError && !profileLoading && (
-          <div
-            className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs"
-            style={{ backgroundColor: "rgba(255,60,60,0.08)", border: "1px solid rgba(255,60,60,0.2)", color: "rgba(255,150,150,0.8)" }}
-          >
-            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-            </svg>
-            Backend no disponible · Mostrando datos de ejemplo.
-          </div>
-        )}
 
         {/* Profile card */}
         <div

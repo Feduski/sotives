@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
   useConnection,
@@ -160,10 +161,10 @@ export default function ConnectButton() {
         {isConnecting ? "Conectando…" : "Conectar Wallet"}
       </button>
 
-      {modalOpen && (
+      {modalOpen && createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ backgroundColor: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(0,0,0,0.88)", backdropFilter: "blur(8px)" }}
           onClick={(e) => e.target === e.currentTarget && handleCloseModal()}
         >
           <div
@@ -250,7 +251,8 @@ export default function ConnectButton() {
               Al conectar aceptás operar en Monad Testnet.
             </p>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

@@ -118,7 +118,7 @@ export default function PublicTab({ username }: { username: string }) {
   const [supportTarget, setSupportTarget] = useState<PublicCommitment | null>(null);
   const [supportAmount, setSupportAmount] = useState("");
   const [supported, setSupported] = useState<Set<string>>(new Set());
-  const [form, setForm] = useState({ goal: "", stake: "", deadline: "", category: "Proyectos", description: "" });
+  const [form, setForm] = useState({ goal: "", stake: "0.0005", deadline: "", category: "Proyectos", description: "" });
 
   const [publishEvidenceType, setPublishEvidenceType] = useState<EvidenceType>("URL");
 
@@ -449,7 +449,7 @@ export default function PublicTab({ username }: { username: string }) {
             <form onSubmit={handleSupport} className="space-y-4">
               <div>
                 <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>Monto (MON)</label>
-                <input type="number" placeholder="10" min={1} value={supportAmount} onChange={(e) => setSupportAmount(e.target.value)} disabled={!isConnected} className="w-full px-4 py-3 rounded-xl text-white text-sm outline-none disabled:opacity-40" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} autoFocus />
+                <input type="number" placeholder="0.0005" min={0.0001} step="any" value={supportAmount} onChange={(e) => setSupportAmount(e.target.value)} disabled={!isConnected} className="w-full px-4 py-3 rounded-xl text-white text-sm outline-none disabled:opacity-40" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} autoFocus />
               </div>
 
               {supportStatus === "success" && supportHash && (
@@ -465,7 +465,7 @@ export default function PublicTab({ username }: { username: string }) {
                 <button type="button" onClick={closeSupport} className="flex-1 py-3 rounded-xl text-sm font-semibold" style={{ backgroundColor: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.6)" }}>
                   {supportStatus === "success" ? "Cerrar" : "Cancelar"}
                 </button>
-                <button type="submit" disabled={!isConnected || !supportAmount || Number(supportAmount) < 1 || supportStatus === "signing" || supportStatus === "confirming" || supportStatus === "success"} className="flex-1 py-3 rounded-xl text-sm font-black disabled:opacity-40 flex items-center justify-center gap-2" style={{ backgroundColor: "#F28B0C", color: "#40011E" }}>
+                <button type="submit" disabled={!isConnected || !supportAmount || Number(supportAmount) <= 0 || supportStatus === "signing" || supportStatus === "confirming" || supportStatus === "success"} className="flex-1 py-3 rounded-xl text-sm font-black disabled:opacity-40 flex items-center justify-center gap-2" style={{ backgroundColor: "#F28B0C", color: "#40011E" }}>
                   {supportStatus === "signing"    && <><Spinner /> Firmando…</>}
                   {supportStatus === "confirming" && <><Spinner /> Confirmando…</>}
                   {supportStatus === "success"    && "✓ Apoyado"}
@@ -516,11 +516,11 @@ export default function PublicTab({ username }: { username: string }) {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>Stake (MON)</label>
-                  <input type="number" placeholder="100" min={1} value={form.stake} onChange={(e) => setForm({ ...form, stake: e.target.value })} disabled={!isConnected} className="w-full px-3 py-2.5 rounded-xl text-white text-sm outline-none disabled:opacity-40" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} />
+                  <input type="number" placeholder="0.0005" min={0.0001} step="any" value={form.stake} onChange={(e) => setForm({ ...form, stake: e.target.value })} disabled={!isConnected} className="w-full px-3 py-2.5 rounded-xl text-white text-sm outline-none disabled:opacity-40" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)" }} />
                 </div>
                 <div>
-                  <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>Fecha límite</label>
-                  <input type="date" value={form.deadline} onChange={(e) => setForm({ ...form, deadline: e.target.value })} className="w-full px-3 py-2.5 rounded-xl text-white text-sm outline-none" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)", colorScheme: "dark" }} />
+                  <label className="text-xs mb-1 block" style={{ color: "rgba(255,255,255,0.4)" }}>Fecha y hora límite</label>
+                  <input type="datetime-local" value={form.deadline} onChange={(e) => setForm({ ...form, deadline: e.target.value })} className="w-full px-3 py-2.5 rounded-xl text-white text-sm outline-none" style={{ backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(116,68,166,0.4)", colorScheme: "dark" }} />
                 </div>
               </div>
 
