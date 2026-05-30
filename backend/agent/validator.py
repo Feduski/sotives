@@ -1,7 +1,7 @@
 """
 AI Validator Agent — soTives
 Analiza evidencia y determina si un compromiso fue cumplido.
-Soporta: GitHub repos/commits, URLs, archivos, posts de X.
+Soporta: GitHub repos/commits, URLs, archivos, texto.
 """
 
 import httpx
@@ -21,7 +21,6 @@ class EvidenceType(str, Enum):
     GITHUB_PR = "github_pr"
     URL = "url"
     FILE = "file"
-    TWITTER_POST = "twitter_post"
     TEXT = "text"
 
 
@@ -95,8 +94,6 @@ class ValidatorAgent:
                 return await self._extract_github_pr(value)
             elif evidence_type == EvidenceType.URL:
                 return await self._fetch_url(value)
-            elif evidence_type == EvidenceType.TWITTER_POST:
-                return await self._extract_tweet(value)
             elif evidence_type == EvidenceType.TEXT:
                 return value
             elif evidence_type == EvidenceType.FILE:
@@ -198,24 +195,6 @@ class ValidatorAgent:
             if "text" in content_type or "json" in content_type:
                 return r.text[:3000]
             return f"[Contenido binario, status {r.status_code}, content-type: {content_type}]"
-
-    async def _extract_tweet(self, url_or_id: str) -> str:
-        """Extrae texto de un tweet via la URL pública."""
-        tweet_id = url_or_id.rstrip("/").split("/")[-1].split("?")[0]
-        bearer = settings.TWITTER_BEARER_TOKEN
-        if not bearer:
-            return f"Twitter no configurado. URL: {url_or_id}"
-
-        async with httpx.AsyncClient() as client:
-            r = await client.get(
-                f"https://api.twitter.com/2/tweets/{tweet_id}",
-                params={"tweet.fields": "created_at,author_id,text"},
-                headers={"Authorization": f"Bearer {bearer}"},
-            )
-            if r.status_code == 200:
-                data = r.json().get("data", {})
-                return f"Tweet [{tweet_id}]:\n{data.get('text', '')}\nFecha: {data.get('created_at', '')}"
-            return f"No se pudo obtener el tweet (status {r.status_code})"
 
     def _build_prompt(
         self,
