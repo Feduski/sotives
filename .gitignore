@@ -34,3 +34,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# base de datos local (no versionar)
+backend/ai_results.db
